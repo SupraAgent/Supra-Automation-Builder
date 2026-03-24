@@ -227,7 +227,7 @@ export const CRM_REGISTRY: NodeRegistry = {
       configFields: [
         { key: "channel_id", label: "Slack Channel", type: "async_select", placeholder: "Select a channel…", optionsUrl: "/api/slack/channels", mapOption: slackChannelMapOption } as AnyField,
         { key: "mention_user_id", label: "@Mention User (optional)", type: "async_select", placeholder: "Select a user…", optionsUrl: "/api/slack/users", mapOption: slackUserMapOption } as AnyField,
-        { key: "message", label: "Message template", type: "textarea", placeholder: "*[{{group_name}}]* {{sender_name}}: {{message_text}}" },
+        { key: "message", label: "Message template", type: "textarea", placeholder: "*[{{group_name}}]* {{sender_name}}: {{message_text}}\n<{{message_link}}|View in Telegram>" },
       ],
       infoText: "Sends to your connected Slack workspace. Variables: {{sender_name}}, {{message_text}}, {{group_name}}, {{message_link}}",
     },
@@ -250,6 +250,7 @@ export const CRM_REGISTRY: NodeRegistry = {
       configFields: [
         { key: "assign_to", label: "Assign to", type: "async_select", placeholder: "Select team member…", optionsUrl: "/api/team", mapOption: teamMapOption } as AnyField,
       ],
+      infoText: "Tip: Use {{current_user}} in a text override to assign to the workflow creator.",
     },
     create_task: {
       subType: "create_task",
