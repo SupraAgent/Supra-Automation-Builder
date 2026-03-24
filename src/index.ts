@@ -51,3 +51,14 @@ export { TriggerNode } from "./components/nodes/trigger-node";
 export { ActionNode } from "./components/nodes/action-node";
 export { ConditionNode } from "./components/nodes/condition-node";
 export { DelayNode } from "./components/nodes/delay-node";
+
+// ── Consumer registries ─────────────────────────────────────────
+export {
+  SUPRATEAM_REGISTRY,
+  SUPRATEAM_TRIGGERS,
+  SUPRATEAM_ACTIONS,
+  SUPRALOOP_REGISTRY,
+  SUPRALOOP_TRIGGERS,
+  SUPRALOOP_ACTIONS,
+  mergeRegistries,
+} from "./registries";
