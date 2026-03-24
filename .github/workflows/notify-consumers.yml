@@ -27,7 +27,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ matrix.repo }}
-          token: ${{ secrets.CONSUMER_REPO_PAT }}
+          token: ${{ secrets.BUILDER_REPO_PAT }}
           path: consumer
 
       - name: Check if dependency exists
@@ -44,7 +44,7 @@ jobs:
         if: steps.check.outputs.has_dep == 'true'
         working-directory: consumer
         env:
-          GH_TOKEN: ${{ secrets.CONSUMER_REPO_PAT }}
+          GH_TOKEN: ${{ secrets.BUILDER_REPO_PAT }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
