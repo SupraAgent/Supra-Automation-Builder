@@ -35,52 +35,55 @@ export function TemplateManager({
   const [newName, setNewName] = React.useState("");
   const [newDesc, setNewDesc] = React.useState("");
   const [selectedCategory, setSelectedCategory] = React.useState<FlowTemplate["category"]>(category);
+  const [customTemplates, setCustomTemplates] = React.useState(getCustomTemplates);
 
   const CATEGORIES: FlowTemplate["category"][] = [
     "team", "app", "benchmark", "scoring", "improve", "workflow", "custom",
   ];
 
   const templates = selectedCategory === "custom"
-    ? getCustomTemplates()
+    ? customTemplates
     : getTemplatesByCategory(selectedCategory);
 
   function handleSaveTemplate() {
     if (!newName.trim()) return;
     const template: FlowTemplate = {
-      id: `custom-${Date.now()}`,
+      id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       name: newName.trim(),
       description: newDesc.trim(),
       category: "custom",
-      nodes: currentNodes,
-      edges: currentEdges,
+      nodes: currentNodes.map((n) => ({ ...n, data: { ...n.data } })),
+      edges: currentEdges.map((e) => ({ ...e, ...(e.style ? { style: { ...e.style } } : {}) })),
       createdAt: new Date().toISOString().split("T")[0],
       isBuiltIn: false,
     };
     saveCustomTemplate(template);
+    setCustomTemplates(getCustomTemplates());
     setNewName("");
     setNewDesc("");
     setTab("browse");
     setSelectedCategory("custom");
   }
 
-  const [, forceUpdate] = React.useState(0);
-
   function handleUseTemplate(template: FlowTemplate) {
     if (template.isBuiltIn) {
       // Create a copy — never edit the original built-in
       const copy = copyTemplate(template);
+      setCustomTemplates(getCustomTemplates());
       onSelect(copy);
     } else {
-      // For custom templates, also create a copy to preserve the original
-      const copy = copyTemplate(template);
-      onSelect(copy);
+      // For custom templates, pass a shallow copy so consumers don't mutate state
+      onSelect({
+        ...template,
+        nodes: template.nodes.map((n) => ({ ...n, data: { ...n.data } })),
+        edges: template.edges.map((e) => ({ ...e, ...(e.style ? { style: { ...e.style } } : {}) })),
+      });
     }
   }
 
   function handleDelete(id: string) {
     deleteCustomTemplate(id);
-    // Force re-render
-    forceUpdate((v) => v + 1);
+    setCustomTemplates(getCustomTemplates());
   }
 
   return (

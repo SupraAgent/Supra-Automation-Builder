@@ -805,12 +805,12 @@ export function getNextCopyName(baseName: string): string {
 export function copyTemplate(template: FlowTemplate): FlowTemplate {
   const name = getNextCopyName(template.name);
   const copy: FlowTemplate = {
-    id: `custom-${Date.now()}`,
+    id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     name,
     description: template.description,
     category: "custom",
     nodes: template.nodes.map((n) => ({ ...n, data: { ...n.data } })),
-    edges: template.edges.map((e) => ({ ...e })),
+    edges: template.edges.map((e) => ({ ...e, ...(e.style ? { style: { ...e.style } } : {}) })),
     createdAt: new Date().toISOString().split("T")[0],
     isBuiltIn: false,
   };
