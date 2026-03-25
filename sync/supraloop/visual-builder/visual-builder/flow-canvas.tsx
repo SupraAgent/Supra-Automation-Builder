@@ -11,9 +11,13 @@ import {
   useNodesState,
   useEdgesState,
   useReactFlow,
+  useOnSelectionChange,
+  useViewport,
+  SelectionMode,
   type Connection,
   type Node,
   type Edge,
+  type NodeChange,
   BackgroundVariant,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -36,9 +40,49 @@ import { NodePalette } from "./node-palette";
 import { NodeInspector } from "./node-inspector";
 import { NodeContextMenu } from "./node-context-menu";
 import { TemplateManager } from "./template-manager";
+import { TemplateSidebar } from "./template-sidebar";
 import type { FlowTemplate } from "@/lib/flow-templates";
+import {
+  builderTemplateToFlowNodes,
+  getNodesCenter,
+  type BuilderTemplate,
+} from "@/lib/builder-templates";
 import { useUndoRedo } from "@/lib/use-undo-redo";
+import { useClipboard } from "@/lib/use-clipboard";
+import {
+  useNodeGroups,
+  applyGroupDragConstraints,
+  createGroupId,
+} from "@/lib/use-node-groups";
 import { autoLayout } from "@/lib/auto-layout";
+
+// ── Group color palette (rotating, visually distinct on dark bg) ──
+const GROUP_COLORS = [
+  { bg: "rgba(99, 102, 241, 0.08)", border: "rgba(99, 102, 241, 0.35)", text: "#818cf8" },   // indigo
+  { bg: "rgba(244, 114, 182, 0.08)", border: "rgba(244, 114, 182, 0.35)", text: "#f472b6" },  // pink
+  { bg: "rgba(251, 191, 36, 0.08)", border: "rgba(251, 191, 36, 0.35)", text: "#fbbf24" },    // amber
+  { bg: "rgba(52, 211, 153, 0.08)", border: "rgba(52, 211, 153, 0.35)", text: "#34d399" },    // emerald
+  { bg: "rgba(96, 165, 250, 0.08)", border: "rgba(96, 165, 250, 0.35)", text: "#60a5fa" },    // blue
+  { bg: "rgba(251, 146, 60, 0.08)", border: "rgba(251, 146, 60, 0.35)", text: "#fb923c" },    // orange
+  { bg: "rgba(167, 139, 250, 0.08)", border: "rgba(167, 139, 250, 0.35)", text: "#a78bfa" },  // violet
+  { bg: "rgba(45, 212, 191, 0.08)", border: "rgba(45, 212, 191, 0.35)", text: "#2dd4bf" },    // teal
+];
+
+/** Deterministic color index from groupId string */
+function groupColorIndex(groupId: string): number {
+  let hash = 0;
+  for (let i = 0; i < groupId.length; i++) hash = ((hash << 5) - hash + groupId.charCodeAt(i)) | 0;
+  return Math.abs(hash) % GROUP_COLORS.length;
+}
+
+/** Restore locked-group CSS class from node data (survives serialization) */
+function restoreGroupClassName(node: Node): Node {
+  if (node.data?.groupId && !node.className?.includes("locked-group")) {
+    const existing = node.className ? `${node.className} ` : "";
+    return { ...node, className: `${existing}locked-group` };
+  }
+  return node;
+}
 
 const nodeTypes = {
   personaNode: PersonaNode,
@@ -79,13 +123,15 @@ function FlowCanvasInner({
   onEdgesChange: onEdgesChangeCb,
 }: FlowCanvasProps) {
   const { screenToFlowPosition, fitView, getNodes } = useReactFlow();
-  const [nodes, setNodes, onNodesChange] = useNodesState(
-    initialTemplate ? autoLayout(initialTemplate.nodes) : []
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const [nodes, setNodes, rawOnNodesChange] = useNodesState(
+    initialTemplate ? autoLayout(initialTemplate.nodes).map(restoreGroupClassName) : []
   );
   const [edges, setEdges, onEdgesChange] = useEdgesState(
     initialTemplate?.edges ?? []
   );
   const [showTemplates, setShowTemplates] = React.useState(!initialTemplate);
+  const [showTemplateSidebar, setShowTemplateSidebar] = React.useState(false);
   const [needsPostRenderLayout, setNeedsPostRenderLayout] = React.useState(!!initialTemplate);
 
   // Post-render auto-layout: once nodes are measured, re-run layout with real sizes
@@ -104,12 +150,14 @@ function FlowCanvasInner({
   const [selectedNodeId, setSelectedNodeId] = React.useState<string | null>(
     null
   );
-  const [contextMenu, setContextMenu] = React.useState<{
-    nodeId: string;
-    x: number;
-    y: number;
-  } | null>(null);
+  const [selectedNodeIds, setSelectedNodeIds] = React.useState<string[]>([]);
+  const [contextMenu, setContextMenu] = React.useState<
+    | { type: "node"; nodeId: string; x: number; y: number }
+    | { type: "selection"; nodeIds: string[]; x: number; y: number }
+    | null
+  >(null);
 
+  // ── Hooks ────────────────────────────────────────────────────
   const setNodesDirectly = React.useCallback(
     (n: Node[]) => setNodes(n),
     [setNodes]
@@ -125,20 +173,84 @@ function FlowCanvasInner({
     setEdgesDirectly
   );
 
+  const { lockedGroups, isNodeInLockedGroup, getGroupId } =
+    useNodeGroups(nodes);
+
+  useClipboard(nodes, edges, setNodes, setEdges);
+
+  // Track multi-selection
+  useOnSelectionChange({
+    onChange: React.useCallback(
+      ({ nodes: selNodes }: { nodes: Node[] }) => {
+        const ids = selNodes.map((n) => n.id);
+        setSelectedNodeIds(ids);
+        if (ids.length === 1) {
+          setSelectedNodeId(ids[0]);
+        } else if (ids.length === 0) {
+          setSelectedNodeId(null);
+        }
+      },
+      []
+    ),
+  });
+
   const selectedNode = React.useMemo(
     () => nodes.find((n) => n.id === selectedNodeId) ?? null,
     [nodes, selectedNodeId]
   );
 
-  // Notify parent of changes
-  React.useEffect(() => {
-    onNodesChangeCb?.(nodes);
-  }, [nodes, onNodesChangeCb]);
+  // ── Notify parent (use refs to avoid re-render churn) ────────
+  const onNodesChangeCbRef = React.useRef(onNodesChangeCb);
+  onNodesChangeCbRef.current = onNodesChangeCb;
+  const onEdgesChangeCbRef = React.useRef(onEdgesChangeCb);
+  onEdgesChangeCbRef.current = onEdgesChangeCb;
 
   React.useEffect(() => {
-    onEdgesChangeCb?.(edges);
-  }, [edges, onEdgesChangeCb]);
+    onNodesChangeCbRef.current?.(nodes);
+  }, [nodes]);
 
+  React.useEffect(() => {
+    onEdgesChangeCbRef.current?.(edges);
+  }, [edges]);
+
+  // ── Delete/Backspace key handler ────────────────────────────
+  React.useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.target as HTMLElement)?.tagName === "INPUT" || (e.target as HTMLElement)?.tagName === "TEXTAREA") return;
+      if (e.key === "Delete" || e.key === "Backspace") {
+        const selected = nodes.filter((n) => n.selected);
+        if (selected.length === 0) return;
+        e.preventDefault();
+        const ids = selected.map((n) => n.id);
+        const deletable = ids.filter((id) => !isNodeInLockedGroup(id));
+        if (deletable.length === 0) {
+          alert("All selected nodes are in locked groups. Unlock first.");
+          return;
+        }
+        const idSet = new Set(deletable);
+        setNodes((nds) => nds.filter((n) => !idSet.has(n.id)));
+        setEdges((eds) => eds.filter((e) => !idSet.has(e.source) && !idSet.has(e.target)));
+        setSelectedNodeId(null);
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [nodes, isNodeInLockedGroup, setNodes, setEdges]);
+
+  // ── Wrap onNodesChange to enforce group constraints ──────────
+  const handleNodesChange = React.useCallback(
+    (changes: NodeChange[]) => {
+      const constrained = applyGroupDragConstraints(
+        changes,
+        nodes,
+        lockedGroups
+      );
+      rawOnNodesChange(constrained);
+    },
+    [rawOnNodesChange, nodes, lockedGroups]
+  );
+
+  // ── Connections ──────────────────────────────────────────────
   const onConnect = React.useCallback(
     (params: Connection) => {
       setEdges((eds) =>
@@ -148,22 +260,104 @@ function FlowCanvasInner({
     [setEdges]
   );
 
-  const onDragOver = React.useCallback(
-    (event: React.DragEvent) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "move";
-    },
-    []
-  );
+  // ── Drag & Drop ──────────────────────────────────────────────
+  const onDragOver = React.useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    const hasTemplate =
+      event.dataTransfer.types.includes("application/builder-template") ||
+      event.dataTransfer.types.includes("application/reactflow-template");
+    event.dataTransfer.dropEffect = hasTemplate ? "copy" : "move";
+  }, []);
 
   const onDrop = React.useCallback(
     (event: React.DragEvent) => {
       event.preventDefault();
+
+      // Handle template drops from sidebar
+      const templateStr = event.dataTransfer.getData("application/reactflow-template");
+      if (templateStr) {
+        try {
+          const template: FlowTemplate = JSON.parse(templateStr);
+          const dropPos = screenToFlowPosition({
+            x: event.clientX,
+            y: event.clientY,
+          });
+          const minX = Math.min(...template.nodes.map((n) => n.position.x));
+          const minY = Math.min(...template.nodes.map((n) => n.position.y));
+          const suffix = Date.now();
+          const idMap: Record<string, string> = {};
+          // Auto-lock dropped template nodes as a group
+          const gid = createGroupId();
+          const newNodes = template.nodes.map((n) => {
+            const newId = `${n.type}-${suffix}-${n.id}`;
+            idMap[n.id] = newId;
+            return {
+              ...n,
+              id: newId,
+              position: {
+                x: dropPos.x + (n.position.x - minX),
+                y: dropPos.y + (n.position.y - minY),
+              },
+              data: { ...JSON.parse(JSON.stringify(n.data)), groupId: gid },
+              className: "locked-group",
+            };
+          });
+          const newEdges = template.edges.map((e) => ({
+            ...e,
+            id: `e-${suffix}-${e.id}`,
+            source: idMap[e.source] ?? e.source,
+            target: idMap[e.target] ?? e.target,
+          }));
+          setNodes((nds) => [...nds, ...newNodes]);
+          setEdges((eds) => [...eds, ...newEdges]);
+        } catch {
+          // ignore malformed template data
+        }
+        return;
+      }
+
+      // Builder template drop
+      const builderTemplateStr = event.dataTransfer.getData(
+        "application/builder-template"
+      );
+      if (builderTemplateStr) {
+        try {
+          const template: BuilderTemplate = JSON.parse(builderTemplateStr);
+          const dropPos = screenToFlowPosition({
+            x: event.clientX,
+            y: event.clientY,
+          });
+          const { nodes: newNodes, edges: newEdges } =
+            builderTemplateToFlowNodes(template, 0);
+          const center = getNodesCenter(newNodes);
+          // Auto-lock dropped template nodes as a group
+          const gid = createGroupId();
+          const adjusted = newNodes.map((n) => ({
+            ...n,
+            position: {
+              x: n.position.x + dropPos.x - center.x,
+              y: n.position.y + dropPos.y - center.y,
+            },
+            data: { ...JSON.parse(JSON.stringify(n.data)), groupId: gid },
+            className: "locked-group",
+          }));
+          setNodes((nds) => [...nds, ...adjusted]);
+          setEdges((eds) => [...eds, ...newEdges]);
+        } catch {
+          // ignore
+        }
+        return;
+      }
+
+      // Single node drop from palette
       const type = event.dataTransfer.getData("application/reactflow-type");
       const dataStr = event.dataTransfer.getData("application/reactflow-data");
       if (!type) return;
 
-      const data = dataStr ? JSON.parse(dataStr) : {};
+      let data: Record<string, unknown> = {};
+      if (dataStr) {
+        try { data = JSON.parse(dataStr); } catch { /* ignore malformed */ }
+      }
       const position = screenToFlowPosition({
         x: event.clientX,
         y: event.clientY,
@@ -178,9 +372,10 @@ function FlowCanvasInner({
 
       setNodes((nds) => [...nds, newNode]);
     },
-    [setNodes, screenToFlowPosition]
+    [setNodes, setEdges, screenToFlowPosition]
   );
 
+  // ── Node interactions ────────────────────────────────────────
   const handleNodeClick = React.useCallback(
     (_event: React.MouseEvent, node: Node) => {
       setSelectedNodeId(node.id);
@@ -196,7 +391,25 @@ function FlowCanvasInner({
   const handleNodeContextMenu = React.useCallback(
     (event: React.MouseEvent, node: Node) => {
       event.preventDefault();
-      setContextMenu({ nodeId: node.id, x: event.clientX, y: event.clientY });
+      setContextMenu({
+        type: "node",
+        nodeId: node.id,
+        x: event.clientX,
+        y: event.clientY,
+      });
+    },
+    []
+  );
+
+  const handleSelectionContextMenu = React.useCallback(
+    (event: React.MouseEvent, selNodes: Node[]) => {
+      event.preventDefault();
+      setContextMenu({
+        type: "selection",
+        nodeIds: selNodes.map((n) => n.id),
+        x: event.clientX,
+        y: event.clientY,
+      });
     },
     []
   );
@@ -210,7 +423,7 @@ function FlowCanvasInner({
           id: `${src.type}-${Date.now()}`,
           type: src.type,
           position: { x: src.position.x + 40, y: src.position.y + 40 },
-          data: { ...src.data },
+          data: JSON.parse(JSON.stringify(src.data)),
         };
         return [...nds, dup];
       });
@@ -229,22 +442,137 @@ function FlowCanvasInner({
 
   const handleNodeDelete = React.useCallback(
     (nodeId: string) => {
+      // Don't allow deleting individual nodes that are in a locked group
+      if (isNodeInLockedGroup(nodeId)) {
+        alert("This node is in a locked group. Unlock the group first to delete individual nodes.");
+        return;
+      }
       setNodes((nds) => nds.filter((n) => n.id !== nodeId));
       setEdges((eds) =>
         eds.filter((e) => e.source !== nodeId && e.target !== nodeId)
       );
       setSelectedNodeId(null);
     },
+    [setNodes, setEdges, isNodeInLockedGroup]
+  );
+
+  const handleDeleteSelection = React.useCallback(
+    (nodeIds: string[]) => {
+      // Filter out nodes that belong to locked groups
+      const deletable = nodeIds.filter((id) => !isNodeInLockedGroup(id));
+      if (deletable.length === 0) {
+        alert("All selected nodes are in locked groups. Unlock the groups first to delete.");
+        return;
+      }
+      const idSet = new Set(deletable);
+      setNodes((nds) => nds.filter((n) => !idSet.has(n.id)));
+      setEdges((eds) =>
+        eds.filter((e) => !idSet.has(e.source) && !idSet.has(e.target))
+      );
+      setSelectedNodeId(null);
+    },
+    [setNodes, setEdges, isNodeInLockedGroup]
+  );
+
+  // ── Lock / Unlock groups ─────────────────────────────────────
+  const handleLockGroup = React.useCallback(
+    (nodeIds: string[]) => {
+      const gid = createGroupId();
+      setNodes((nds) =>
+        nds.map((n) =>
+          nodeIds.includes(n.id)
+            ? { ...n, data: { ...n.data, groupId: gid }, className: "locked-group" }
+            : n
+        )
+      );
+    },
+    [setNodes]
+  );
+
+  const handleUnlockGroup = React.useCallback(
+    (nodeIds: string[]) => {
+      // Find the groupId from any node in the selection
+      const node = nodes.find(
+        (n) => nodeIds.includes(n.id) && n.data?.groupId
+      );
+      if (!node?.data?.groupId) return;
+      const gid = node.data.groupId as string;
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.data?.groupId === gid
+            ? {
+                ...n,
+                data: { ...n.data, groupId: undefined },
+                className: (n.className ?? "").replace(/\blocked-group\b/g, "").trim() || undefined,
+              }
+            : n
+        )
+      );
+    },
+    [nodes, setNodes]
+  );
+
+  // ── Select an entire group (deselect everything else) ────────
+  const handleSelectGroup = React.useCallback(
+    (groupId: string) => {
+      const members = lockedGroups.get(groupId);
+      if (!members) return;
+      setNodes((nds) =>
+        nds.map((n) => ({ ...n, selected: members.has(n.id) }))
+      );
+      setSelectedNodeIds([...members]);
+      setSelectedNodeId(null);
+      setContextMenu(null);
+    },
+    [lockedGroups, setNodes]
+  );
+
+  // ── Merge for parent (My Templates panel / sidebar) ──────────
+  const mergeNodesIntoCanvas = React.useCallback(
+    (newNodes: Node[], newEdges: Edge[]) => {
+      // Auto-lock merged template nodes as a group
+      const gid = createGroupId();
+      const lockedNodes = newNodes.map((n) => ({
+        ...n,
+        data: { ...JSON.parse(JSON.stringify(n.data)), groupId: gid },
+        className: "locked-group",
+      }));
+      setNodes((nds) => [...nds, ...lockedNodes]);
+      setEdges((eds) => [...eds, ...newEdges]);
+    },
     [setNodes, setEdges]
   );
 
   function handleLoadTemplate(template: FlowTemplate) {
-    setNodes(autoLayout(template.nodes));
-    setEdges(template.edges);
+    // Confirm before replacing existing canvas content
+    if (
+      nodes.length > 0 &&
+      !window.confirm(
+        "Loading this template will replace your current canvas. Continue?"
+      )
+    ) {
+      return;
+    }
+    // Deep copy nodes without auto-locking — replacing the canvas is not a group operation
+    const freshNodes = template.nodes.map((n) => ({
+      ...n,
+      data: JSON.parse(JSON.stringify(n.data)),
+    }));
+    setNodes(autoLayout(freshNodes));
+    setEdges(template.edges.map((e) => ({ ...e })));
     setShowTemplates(false);
     setSelectedNodeId(null);
     setNeedsPostRenderLayout(true);
   }
+
+  // ── Check if context menu target is locked ───────────────────
+  const contextMenuIsLocked = React.useMemo(() => {
+    if (!contextMenu) return false;
+    if (contextMenu.type === "node") {
+      return isNodeInLockedGroup(contextMenu.nodeId);
+    }
+    return contextMenu.nodeIds.some((id) => isNodeInLockedGroup(id));
+  }, [contextMenu, isNodeInLockedGroup]);
 
   const handleAutoLayout = React.useCallback(() => {
     const measured = getNodes();
@@ -254,7 +582,7 @@ function FlowCanvasInner({
 
   return (
     <div className="relative flex h-full w-full">
-      <div className="relative flex-1">
+      <div ref={containerRef} className="relative flex-1">
         {showTemplates && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/80 backdrop-blur-sm">
             <TemplateManager
@@ -296,8 +624,12 @@ function FlowCanvasInner({
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
           </button>
           <button
-            onClick={() => setShowTemplates(true)}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-foreground hover:bg-white/10 transition"
+            onClick={() => setShowTemplateSidebar((v) => !v)}
+            className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+              showTemplateSidebar
+                ? "border-primary/30 bg-primary/10 text-primary"
+                : "border-white/10 bg-white/5 text-foreground hover:bg-white/10"
+            }`}
           >
             Templates
           </button>
@@ -306,7 +638,7 @@ function FlowCanvasInner({
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          onNodesChange={onNodesChange}
+          onNodesChange={handleNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onDragOver={onDragOver}
@@ -314,7 +646,11 @@ function FlowCanvasInner({
           onNodeClick={handleNodeClick}
           onPaneClick={handlePaneClick}
           onNodeContextMenu={handleNodeContextMenu}
+          onSelectionContextMenu={handleSelectionContextMenu}
           nodeTypes={nodeTypes}
+          selectionOnDrag
+          selectionMode={SelectionMode.Partial}
+          panOnDrag={[1, 2]}
           fitView
           className="bg-background"
           defaultEdgeOptions={{
@@ -336,13 +672,21 @@ function FlowCanvasInner({
             maskColor="rgba(0,0,0,0.6)"
           />
         </ReactFlow>
+        <GroupOverlays
+          nodes={nodes}
+          lockedGroups={lockedGroups}
+          onUnlock={handleUnlockGroup}
+          onSelectGroup={handleSelectGroup}
+          containerRef={containerRef}
+        />
       </div>
 
       {/* Context Menu */}
-      {contextMenu && (
+      {contextMenu?.type === "node" && (
         <NodeContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
+          isLocked={contextMenuIsLocked}
           onEdit={() => {
             setSelectedNodeId(contextMenu.nodeId);
             setContextMenu(null);
@@ -355,7 +699,59 @@ function FlowCanvasInner({
             handleNodeDelete(contextMenu.nodeId);
             setContextMenu(null);
           }}
+          onUnlockGroup={
+            contextMenuIsLocked
+              ? () => {
+                  handleUnlockGroup([contextMenu.nodeId]);
+                  setContextMenu(null);
+                }
+              : undefined
+          }
           onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {contextMenu?.type === "selection" && (
+        <NodeContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          selectionCount={contextMenu.nodeIds.length}
+          isLocked={contextMenuIsLocked}
+          onLockGroup={
+            !contextMenuIsLocked
+              ? () => {
+                  handleLockGroup(contextMenu.nodeIds);
+                  setContextMenu(null);
+                }
+              : undefined
+          }
+          onUnlockGroup={
+            contextMenuIsLocked
+              ? () => {
+                  handleUnlockGroup(contextMenu.nodeIds);
+                  setContextMenu(null);
+                }
+              : undefined
+          }
+          onDelete={() => {
+            handleDeleteSelection(contextMenu.nodeIds);
+            setContextMenu(null);
+          }}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {/* Template Sidebar */}
+      {showTemplateSidebar && (
+        <TemplateSidebar
+          onSelect={handleLoadTemplate}
+          onMerge={mergeNodesIntoCanvas}
+          canvasNodes={nodes}
+          canvasEdges={edges}
+          lockedGroups={lockedGroups}
+          onSelectGroup={handleSelectGroup}
+          onUnlockGroup={handleUnlockGroup}
+          onClose={() => setShowTemplateSidebar(false)}
         />
       )}
 
@@ -371,3 +767,134 @@ function FlowCanvasInner({
     </div>
   );
 }
+
+/**
+ * Renders colored bounding boxes behind each locked group with an unlock button.
+ * Clicking the bounding box background selects only that group.
+ * Each group gets a unique color from a rotating palette.
+ */
+function GroupOverlays({
+  nodes,
+  lockedGroups,
+  onUnlock,
+  onSelectGroup,
+  containerRef,
+}: {
+  nodes: Node[];
+  lockedGroups: Map<string, Set<string>>;
+  onUnlock: (nodeIds: string[]) => void;
+  onSelectGroup: (groupId: string) => void;
+  containerRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const { flowToScreenPosition, getNodes } = useReactFlow();
+  const viewport = useViewport();
+
+  if (lockedGroups.size === 0) return null;
+
+  const containerRect = containerRef.current?.getBoundingClientRect();
+  if (!containerRect) return null;
+
+  const measured = getNodes();
+  const overlays: React.ReactNode[] = [];
+  const PAD = 16; // padding around the group bounding box
+
+  for (const [groupId, memberIds] of lockedGroups) {
+    const members = nodes.filter((n) => memberIds.has(n.id));
+    if (members.length === 0) continue;
+
+    const color = GROUP_COLORS[groupColorIndex(groupId)];
+
+    // Compute bounding box in flow coordinates
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of members) {
+      const mNode = measured.find((m) => m.id === n.id);
+      const w = (mNode as { measured?: { width?: number } })?.measured?.width ?? 200;
+      const h = (mNode as { measured?: { height?: number } })?.measured?.height ?? 130;
+      minX = Math.min(minX, n.position.x);
+      minY = Math.min(minY, n.position.y);
+      maxX = Math.max(maxX, n.position.x + w);
+      maxY = Math.max(maxY, n.position.y + h);
+    }
+
+    // Convert corners to screen coordinates relative to container
+    const topLeft = flowToScreenPosition({ x: minX - PAD, y: minY - PAD });
+    const bottomRight = flowToScreenPosition({ x: maxX + PAD, y: maxY + PAD });
+
+    const left = topLeft.x - containerRect.left;
+    const top = topLeft.y - containerRect.top;
+    const width = bottomRight.x - topLeft.x;
+    const height = bottomRight.y - topLeft.y;
+
+    // Don't render if too small (fully zoomed out)
+    if (width < 20 || height < 20) continue;
+
+    // Derive a label from the first node's type or label
+    const firstNode = members[0];
+    const label = (firstNode.data?.label as string) || firstNode.type || "Group";
+    const groupLabel = members.length > 1 ? `${label} +${members.length - 1}` : label;
+
+    overlays.push(
+      <div
+        key={groupId}
+        className="absolute pointer-events-auto cursor-pointer transition-colors"
+        style={{
+          left,
+          top,
+          width,
+          height,
+          backgroundColor: color.bg,
+          border: `1.5px dashed ${color.border}`,
+          borderRadius: 12,
+          zIndex: 1,
+        }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelectGroup(groupId);
+        }}
+        title={`Click to select group: ${groupLabel}`}
+      >
+        {/* Group label badge — top-left */}
+        <div
+          className="absolute flex items-center gap-1.5 rounded-br-lg rounded-tl-[11px] px-2 py-1 text-[10px] font-semibold backdrop-blur-sm pointer-events-none"
+          style={{
+            backgroundColor: color.bg,
+            borderBottom: `1px solid ${color.border}`,
+            borderRight: `1px solid ${color.border}`,
+            color: color.text,
+          }}
+        >
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+          {groupLabel}
+        </div>
+
+        {/* Unlock button — top-right */}
+        <button
+          className="absolute right-1.5 top-1.5 flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium backdrop-blur-sm transition hover:brightness-125 pointer-events-auto"
+          style={{
+            backgroundColor: color.border,
+            color: "#fff",
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onUnlock([...memberIds]);
+          }}
+          title="Unlock this group"
+        >
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 9.9-1" />
+          </svg>
+          Unlock
+        </button>
+      </div>
+    );
+  }
+
+  return <>{overlays}</>;
+}
+
+/** Export group color helpers for use in sidebar */
+export { GROUP_COLORS, groupColorIndex };
