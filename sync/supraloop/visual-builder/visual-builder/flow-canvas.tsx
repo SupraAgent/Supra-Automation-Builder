@@ -36,7 +36,12 @@ import { NodePalette } from "./node-palette";
 import { NodeInspector } from "./node-inspector";
 import { NodeContextMenu } from "./node-context-menu";
 import { TemplateManager } from "./template-manager";
+import { TemplateSidebar } from "./template-sidebar";
 import type { FlowTemplate } from "@/lib/flow-templates";
+import {
+  builderTemplateToFlowNodes,
+  type BuilderTemplate,
+} from "@/lib/builder-templates";
 import { useUndoRedo } from "@/lib/use-undo-redo";
 import { autoLayout } from "@/lib/auto-layout";
 
@@ -62,6 +67,10 @@ type FlowCanvasProps = {
   category: FlowTemplate["category"];
   onNodesChange?: (nodes: Node[]) => void;
   onEdgesChange?: (edges: Edge[]) => void;
+  /** Ref to allow parent to merge nodes/edges additively */
+  mergeRef?: React.RefObject<{
+    mergeNodes: (newNodes: Node[], newEdges: Edge[]) => void;
+  } | null>;
 };
 
 export function FlowCanvas(props: FlowCanvasProps) {
@@ -72,11 +81,16 @@ export function FlowCanvas(props: FlowCanvasProps) {
   );
 }
 
+export type FlowCanvasMergeHandle = {
+  mergeNodes: (newNodes: Node[], newEdges: Edge[]) => void;
+};
+
 function FlowCanvasInner({
   initialTemplate,
   category,
   onNodesChange: onNodesChangeCb,
   onEdgesChange: onEdgesChangeCb,
+  mergeRef,
 }: FlowCanvasProps) {
   const { screenToFlowPosition, fitView, getNodes } = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState(
@@ -86,6 +100,7 @@ function FlowCanvasInner({
     initialTemplate?.edges ?? []
   );
   const [showTemplates, setShowTemplates] = React.useState(!initialTemplate);
+  const [showTemplateSidebar, setShowTemplateSidebar] = React.useState(false);
   const [needsPostRenderLayout, setNeedsPostRenderLayout] = React.useState(!!initialTemplate);
 
   // Post-render auto-layout: once nodes are measured, re-run layout with real sizes
@@ -159,6 +174,78 @@ function FlowCanvasInner({
   const onDrop = React.useCallback(
     (event: React.DragEvent) => {
       event.preventDefault();
+
+      // Handle template drops from sidebar
+      const templateStr = event.dataTransfer.getData("application/reactflow-template");
+      if (templateStr) {
+        try {
+          const template: FlowTemplate = JSON.parse(templateStr);
+          const dropPos = screenToFlowPosition({
+            x: event.clientX,
+            y: event.clientY,
+          });
+          // Offset all template nodes relative to drop position
+          const minX = Math.min(...template.nodes.map((n) => n.position.x));
+          const minY = Math.min(...template.nodes.map((n) => n.position.y));
+          const suffix = Date.now();
+          const idMap: Record<string, string> = {};
+          const newNodes = template.nodes.map((n) => {
+            const newId = `${n.type}-${suffix}-${n.id}`;
+            idMap[n.id] = newId;
+            return {
+              ...n,
+              id: newId,
+              position: {
+                x: dropPos.x + (n.position.x - minX),
+                y: dropPos.y + (n.position.y - minY),
+              },
+              data: { ...n.data },
+            };
+          });
+          const newEdges = template.edges.map((e) => ({
+            ...e,
+            id: `e-${suffix}-${e.id}`,
+            source: idMap[e.source] ?? e.source,
+            target: idMap[e.target] ?? e.target,
+          }));
+          setNodes((nds) => [...nds, ...newNodes]);
+          setEdges((eds) => [...eds, ...newEdges]);
+        } catch {
+          // ignore malformed template data
+        }
+        return;
+      }
+
+      // Handle builder template drop
+      const builderTemplateStr = event.dataTransfer.getData(
+        "application/builder-template"
+      );
+      if (builderTemplateStr) {
+        try {
+          const template: BuilderTemplate = JSON.parse(builderTemplateStr);
+          const dropPos = screenToFlowPosition({
+            x: event.clientX,
+            y: event.clientY,
+          });
+          const { nodes: newNodes, edges: newEdges } =
+            builderTemplateToFlowNodes(template, 0);
+          // Offset all nodes to drop position
+          const adjusted = newNodes.map((n) => ({
+            ...n,
+            position: {
+              x: n.position.x + dropPos.x - 400,
+              y: n.position.y + dropPos.y - 250,
+            },
+          }));
+          setNodes((nds) => [...nds, ...adjusted]);
+          setEdges((eds) => [...eds, ...newEdges]);
+        } catch {
+          // ignore invalid data
+        }
+        return;
+      }
+
+      // Handle single node drops from palette
       const type = event.dataTransfer.getData("application/reactflow-type");
       const dataStr = event.dataTransfer.getData("application/reactflow-data");
       if (!type) return;
@@ -178,7 +265,7 @@ function FlowCanvasInner({
 
       setNodes((nds) => [...nds, newNode]);
     },
-    [setNodes, screenToFlowPosition]
+    [setNodes, setEdges, screenToFlowPosition]
   );
 
   const handleNodeClick = React.useCallback(
@@ -238,6 +325,24 @@ function FlowCanvasInner({
     [setNodes, setEdges]
   );
 
+  // Merge nodes/edges additively (for builder templates)
+  const mergeNodesIntoCanvas = React.useCallback(
+    (newNodes: Node[], newEdges: Edge[]) => {
+      setNodes((nds) => [...nds, ...newNodes]);
+      setEdges((eds) => [...eds, ...newEdges]);
+    },
+    [setNodes, setEdges]
+  );
+
+  // Expose merge function to parent via ref
+  React.useEffect(() => {
+    if (mergeRef && "current" in mergeRef) {
+      (mergeRef as React.MutableRefObject<FlowCanvasMergeHandle | null>).current = {
+        mergeNodes: mergeNodesIntoCanvas,
+      };
+    }
+  }, [mergeRef, mergeNodesIntoCanvas]);
+
   function handleLoadTemplate(template: FlowTemplate) {
     setNodes(autoLayout(template.nodes));
     setEdges(template.edges);
@@ -296,8 +401,12 @@ function FlowCanvasInner({
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
           </button>
           <button
-            onClick={() => setShowTemplates(true)}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-foreground hover:bg-white/10 transition"
+            onClick={() => setShowTemplateSidebar((v) => !v)}
+            className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+              showTemplateSidebar
+                ? "border-primary/30 bg-primary/10 text-primary"
+                : "border-white/10 bg-white/5 text-foreground hover:bg-white/10"
+            }`}
           >
             Templates
           </button>
@@ -356,6 +465,14 @@ function FlowCanvasInner({
             setContextMenu(null);
           }}
           onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {/* Template Sidebar */}
+      {showTemplateSidebar && (
+        <TemplateSidebar
+          onSelect={handleLoadTemplate}
+          onClose={() => setShowTemplateSidebar(false)}
         />
       )}
 
