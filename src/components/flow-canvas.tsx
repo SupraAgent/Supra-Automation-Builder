@@ -22,6 +22,10 @@ import { TriggerNode } from "./nodes/trigger-node";
 import { ActionNode } from "./nodes/action-node";
 import { ConditionNode } from "./nodes/condition-node";
 import { DelayNode } from "./nodes/delay-node";
+import { TryCatchNode } from "./nodes/try-catch-node";
+import { CodeNode } from "./nodes/code-node";
+import { SwitchNode } from "./nodes/switch-node";
+import { LoopNode } from "./nodes/loop-node";
 import { NodeSidebar } from "./node-sidebar";
 import { NodeConfigPanel } from "./node-config-panel";
 import type { WorkflowNodeData } from "../core/types";
@@ -31,6 +35,10 @@ const nodeTypes: NodeTypes = {
   action: ActionNode,
   condition: ConditionNode,
   delay: DelayNode,
+  try_catch: TryCatchNode,
+  code: CodeNode,
+  switch: SwitchNode,
+  loop: LoopNode,
 };
 
 export interface FlowCanvasProps {
@@ -141,6 +149,14 @@ function FlowCanvasInner({
         data = { nodeType: "action", actionType: subType, label, config: defaultConfig };
       } else if (nodeType === "condition") {
         data = { nodeType: "condition", label, config: { field: "", operator: "equals", value: "", ...defaultConfig } };
+      } else if (nodeType === "try_catch") {
+        data = { nodeType: "try_catch", label, config: { tryPath: "success", catchPath: "error", ...defaultConfig } };
+      } else if (nodeType === "code") {
+        data = { nodeType: "code", label, config: { language: "javascript", code: "", timeout: 5000, ...defaultConfig } };
+      } else if (nodeType === "switch") {
+        data = { nodeType: "switch", label, config: { expression: "", cases: [], defaultCase: "default", ...defaultConfig } };
+      } else if (nodeType === "loop") {
+        data = { nodeType: "loop", label, config: { arrayExpression: "", itemVariable: "item", maxIterations: 100, ...defaultConfig } };
       } else {
         data = { nodeType: "delay", label, config: { duration: 1, unit: "hours", ...defaultConfig } };
       }
@@ -228,6 +244,10 @@ function FlowCanvasInner({
                 case "action": return "rgba(59, 130, 246, 0.5)";
                 case "condition": return "rgba(234, 179, 8, 0.5)";
                 case "delay": return "rgba(156, 163, 175, 0.5)";
+                case "try_catch": return "rgba(249, 115, 22, 0.5)";
+                case "code": return "rgba(139, 92, 246, 0.5)";
+                case "switch": return "rgba(6, 182, 212, 0.5)";
+                case "loop": return "rgba(99, 102, 241, 0.5)";
                 default: return "rgba(255,255,255,0.1)";
               }
             }}

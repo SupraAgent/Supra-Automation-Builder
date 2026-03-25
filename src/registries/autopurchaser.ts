@@ -66,6 +66,7 @@ export const AUTOPURCHASER_ACTION_CONFIGS: Record<string, NodeTypeRegistration> 
   send_telegram: {
     subType: "send_telegram",
     configFields: [
+      { key: "bot_token", label: "Bot Token", type: "secret", placeholder: "credential:<id>" },
       { key: "message", label: "Message template", type: "textarea", placeholder: "Use {{title}}, {{price}}, {{item_url}}, {{keyword}}" },
       { key: "chat_id", label: "Chat ID override (optional)", type: "text", placeholder: "Default: watch's chat ID" },
     ],

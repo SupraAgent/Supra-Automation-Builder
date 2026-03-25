@@ -72,6 +72,7 @@ export const SUPRALOOP_ACTION_CONFIGS: Record<string, NodeTypeRegistration> = {
     configFields: [
       { key: "provider", label: "Provider", type: "select", options: [{ value: "claude", label: "Claude" }, { value: "claude-code", label: "Claude Code" }, { value: "ollama", label: "Ollama" }, { value: "custom", label: "Custom" }] },
       { key: "model", label: "Model", type: "text", placeholder: "e.g. claude-sonnet-4-6" },
+      { key: "api_key", label: "API Key", type: "secret", placeholder: "credential:<id> or raw key" },
       { key: "systemPrompt", label: "System prompt", type: "textarea", placeholder: "Instructions for the model..." },
       { key: "temperature", label: "Temperature", type: "number", defaultValue: 0.7 },
     ],
@@ -93,6 +94,7 @@ export const SUPRALOOP_ACTION_CONFIGS: Record<string, NodeTypeRegistration> = {
   github_commit: {
     subType: "github_commit",
     configFields: [
+      { key: "github_token", label: "GitHub Token", type: "secret", placeholder: "credential:<id>" },
       { key: "repo", label: "Repository", type: "text", placeholder: "owner/repo" },
       { key: "branch", label: "Branch", type: "text", placeholder: "main" },
       { key: "message", label: "Commit message", type: "text", placeholder: "Commit message..." },
@@ -103,7 +105,7 @@ export const SUPRALOOP_ACTION_CONFIGS: Record<string, NodeTypeRegistration> = {
     configFields: [
       { key: "url", label: "URL", type: "text", placeholder: "https://api.example.com/..." },
       { key: "method", label: "Method", type: "select", options: [{ value: "GET", label: "GET" }, { value: "POST", label: "POST" }, { value: "PUT", label: "PUT" }, { value: "DELETE", label: "DELETE" }] },
-      { key: "headers", label: "Headers (JSON)", type: "textarea", placeholder: '{"Authorization": "Bearer ..."}' },
+      { key: "headers", label: "Headers (JSON)", type: "secret", placeholder: '{"Authorization": "credential:<id>"}' },
       { key: "body", label: "Body", type: "textarea", placeholder: "Request body..." },
     ],
   },

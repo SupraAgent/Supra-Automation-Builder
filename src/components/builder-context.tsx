@@ -24,6 +24,38 @@ const DEFAULT_LOGIC: NodePaletteItem[] = [
     icon: "Clock",
     defaultConfig: { duration: 1, unit: "hours" },
   },
+  {
+    type: "try_catch",
+    subType: "try_catch",
+    label: "Try / Catch",
+    description: "Error handling branch",
+    icon: "ShieldAlert",
+    defaultConfig: { tryPath: "success", catchPath: "error" },
+  },
+  {
+    type: "code",
+    subType: "code",
+    label: "Code",
+    description: "Run custom code",
+    icon: "Code",
+    defaultConfig: { language: "javascript", code: "", timeout: 5000 },
+  },
+  {
+    type: "switch",
+    subType: "switch",
+    label: "Switch",
+    description: "Multi-way branch",
+    icon: "Signpost",
+    defaultConfig: { expression: "", cases: [], defaultCase: "default" },
+  },
+  {
+    type: "loop",
+    subType: "loop",
+    label: "Loop",
+    description: "Iterate over array",
+    icon: "Repeat",
+    defaultConfig: { arrayExpression: "", itemVariable: "item", maxIterations: 100 },
+  },
 ];
 
 export interface BuilderContextValue {

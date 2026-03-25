@@ -100,6 +100,7 @@ export const SUPRATEAM_ACTION_CONFIGS: Record<string, NodeTypeRegistration> = {
   send_telegram: {
     subType: "send_telegram",
     configFields: [
+      { key: "bot_token", label: "Bot Token", type: "secret", placeholder: "credential:<id>" },
       { key: "message", label: "Message template", type: "textarea", placeholder: "Use {{deal_name}}, {{stage}}, {{value}}" },
       { key: "chat_id", label: "Chat ID override (optional)", type: "text", placeholder: "Default: deal's linked chat" },
     ],
@@ -115,6 +116,7 @@ export const SUPRATEAM_ACTION_CONFIGS: Record<string, NodeTypeRegistration> = {
   send_slack: {
     subType: "send_slack",
     configFields: [
+      { key: "bot_token", label: "Bot Token", type: "secret", placeholder: "credential:<id>" },
       { key: "channel_id", label: "Slack Channel", type: "text", placeholder: "Channel ID" },
       { key: "mention_user_id", label: "@Mention User (optional)", type: "text", placeholder: "Slack user ID" },
       { key: "message", label: "Message template", type: "textarea", placeholder: "{{sender_name}}: {{message_text}}" },
