@@ -112,6 +112,21 @@ export type AffinityCategoryNodeData = {
   domainExpert: string;
 };
 
+export type ConfigNodeSection = {
+  title: string;
+  value: string;
+  icon: string;
+};
+
+export type ConfigNodeData = {
+  label: string;
+  configType: "root" | "instructions" | "settings" | "command" | "rule" | "skill" | "agent";
+  filePath: string;
+  description: string;
+  gitignored: boolean;
+  sections: ConfigNodeSection[];
+};
+
 // ── Built-in Templates ──────────────────────────────────────────
 
 export const BUILT_IN_TEMPLATES: FlowTemplate[] = [
@@ -713,6 +728,89 @@ export const BUILT_IN_TEMPLATES: FlowTemplate[] = [
       { id: "e3", source: "index", target: "llm", type: "smoothstep", animated: true },
       { id: "e4", source: "search", target: "llm", type: "smoothstep", animated: true },
       { id: "e5", source: "llm", target: "output", type: "smoothstep", animated: true },
+    ],
+  },
+
+  // ── CLAUDE CODE PROJECT STRUCTURE template ──
+  {
+    id: "workflow-claude-project",
+    name: "Claude Code Project",
+    description: "Full .claude/ project structure template — CLAUDE.md, settings, commands, rules, skills, and agents as connected nodes",
+    category: "workflow",
+    isBuiltIn: true,
+    createdAt: "2026-03-25",
+    nodes: [
+      // ── Root project node ──
+      { id: "root", type: "configNode", position: { x: 0, y: 320 }, data: { label: "your-project/", configType: "root", filePath: "./", description: "Project root — all .claude/ config lives here", gitignored: false, sections: [{ title: "CLAUDE.md", value: "Team instructions, committed", icon: "📋" }, { title: ".claude/", value: "Config directory", icon: "📁" }, { title: "CLAUDE.local.md", value: "Personal overrides, gitignored", icon: "🔒" }] } },
+
+      // ── Top-level instruction files ──
+      { id: "claude-md", type: "configNode", position: { x: 350, y: 80 }, data: { label: "CLAUDE.md", configType: "instructions", filePath: "CLAUDE.md", description: "Team-shared instructions — committed to git. Every Claude session loads this automatically.", gitignored: false, sections: [{ title: "Architecture", value: "Stack, patterns, conventions", icon: "🏗️" }, { title: "Key Files", value: "Important paths and purposes", icon: "📂" }, { title: "Guidelines", value: "Code style, testing, deployment", icon: "📏" }, { title: "Context", value: "What the project does and why", icon: "💡" }] } },
+      { id: "claude-local", type: "configNode", position: { x: 350, y: 550 }, data: { label: "CLAUDE.local.md", configType: "instructions", filePath: "CLAUDE.local.md", description: "Personal instruction overrides — gitignored. Your preferences without affecting the team.", gitignored: true, sections: [{ title: "Preferences", value: "Editor style, verbosity, tone", icon: "🎨" }, { title: "Local Paths", value: "Machine-specific overrides", icon: "📍" }, { title: "Debug", value: "Personal debugging shortcuts", icon: "🐛" }] } },
+
+      // ── .claude/ directory hub ──
+      { id: "claude-dir", type: "configNode", position: { x: 700, y: 320 }, data: { label: ".claude/", configType: "root", filePath: ".claude/", description: "Configuration directory — settings, commands, rules, skills, and agents", gitignored: false, sections: [{ title: "settings.json", value: "Shared permissions", icon: "⚙️" }, { title: "commands/", value: "Slash commands", icon: "⌨️" }, { title: "rules/", value: "Auto-loaded context", icon: "📏" }, { title: "skills/", value: "Auto-invoked workflows", icon: "🧠" }, { title: "agents/", value: "Subagent personas", icon: "🤖" }] } },
+
+      // ── Settings ──
+      { id: "settings-json", type: "configNode", position: { x: 1100, y: 0 }, data: { label: "settings.json", configType: "settings", filePath: ".claude/settings.json", description: "Shared team permissions and config — committed to git", gitignored: false, sections: [{ title: "allowedTools", value: "Bash, Read, Edit, Write, Glob, Grep", icon: "🔧" }, { title: "deny", value: "Blocked patterns (e.g. rm -rf /)", icon: "🚫" }, { title: "permissions", value: "Tool-level allow/deny rules", icon: "🔑" }] } },
+      { id: "settings-local", type: "configNode", position: { x: 1100, y: 200 }, data: { label: "settings.local.json", configType: "settings", filePath: ".claude/settings.local.json", description: "Personal permissions — gitignored. Override shared settings for your machine.", gitignored: true, sections: [{ title: "allowedTools", value: "Personal tool overrides", icon: "🔧" }, { title: "env", value: "Local environment variables", icon: "🌐" }] } },
+
+      // ── Commands ──
+      { id: "commands-dir", type: "configNode", position: { x: 1100, y: 400 }, data: { label: "commands/", configType: "command", filePath: ".claude/commands/", description: "Custom slash commands — type /project:<name> to run", gitignored: false, sections: [{ title: "review.md", value: "/project:review — code review workflow", icon: "👁️" }, { title: "fix-issue.md", value: "/project:fix-issue <id> — fix a GitHub issue", icon: "🔨" }, { title: "deploy.md", value: "/project:deploy — deployment workflow", icon: "🚀" }] } },
+      { id: "cmd-review", type: "configNode", position: { x: 1500, y: 310 }, data: { label: "review.md", configType: "command", filePath: ".claude/commands/review.md", description: "Code review command — runs diff analysis, checks types, tests, and conventions", gitignored: false, sections: [{ title: "Trigger", value: "/project:review", icon: "▶" }, { title: "Steps", value: "git diff → type check → test → lint → report", icon: "📝" }, { title: "Output", value: "Structured review with pass/fail", icon: "📤" }] } },
+      { id: "cmd-fix", type: "configNode", position: { x: 1500, y: 510 }, data: { label: "fix-issue.md", configType: "command", filePath: ".claude/commands/fix-issue.md", description: "Fix a GitHub issue by number — fetches context, plans fix, implements, and verifies", gitignored: false, sections: [{ title: "Trigger", value: "/project:fix-issue $ARGUMENTS", icon: "▶" }, { title: "Input", value: "GitHub issue number", icon: "🎯" }, { title: "Steps", value: "Fetch issue → plan → implement → test → PR", icon: "📝" }] } },
+      { id: "cmd-deploy", type: "configNode", position: { x: 1500, y: 710 }, data: { label: "deploy.md", configType: "command", filePath: ".claude/commands/deploy.md", description: "Deployment workflow — build, verify, push, and monitor", gitignored: false, sections: [{ title: "Trigger", value: "/project:deploy", icon: "▶" }, { title: "Steps", value: "Build → test → push → health check", icon: "📝" }, { title: "Platform", value: "Railway / Vercel / custom", icon: "☁️" }] } },
+
+      // ── Rules ──
+      { id: "rules-dir", type: "configNode", position: { x: 1100, y: 630 }, data: { label: "rules/", configType: "rule", filePath: ".claude/rules/", description: "Modular instruction files — auto-loaded as context every session", gitignored: false, sections: [{ title: "code-style.md", value: "TypeScript, React 19, Tailwind conventions", icon: "🎨" }, { title: "testing.md", value: "Build verification, pre-commit checks", icon: "🧪" }, { title: "api-conventions.md", value: "Route handlers, API patterns", icon: "🔌" }] } },
+      { id: "rule-style", type: "configNode", position: { x: 1500, y: 900 }, data: { label: "code-style.md", configType: "rule", filePath: ".claude/rules/code-style.md", description: "Code style conventions — loaded automatically so every session follows the same patterns", gitignored: false, sections: [{ title: "TypeScript", value: "Strict mode, no any, prefer const", icon: "📘" }, { title: "React", value: "Function components, hooks, server components", icon: "⚛️" }, { title: "Tailwind", value: "v4 syntax, design tokens, no arbitrary values", icon: "🎨" }, { title: "Imports", value: "Absolute paths via @/, barrel exports", icon: "📦" }] } },
+      { id: "rule-test", type: "configNode", position: { x: 1500, y: 1120 }, data: { label: "testing.md", configType: "rule", filePath: ".claude/rules/testing.md", description: "Testing rules — build verification and pre-commit requirements", gitignored: false, sections: [{ title: "Build Check", value: "npm run build must pass before commit", icon: "🏗️" }, { title: "Type Check", value: "npx tsc --noEmit must pass", icon: "✅" }, { title: "Manual Test", value: "Verify UI changes in browser", icon: "👁️" }] } },
+      { id: "rule-api", type: "configNode", position: { x: 1500, y: 1310 }, data: { label: "api-conventions.md", configType: "rule", filePath: ".claude/rules/api-conventions.md", description: "API and integration patterns — route handlers, auth, external services", gitignored: false, sections: [{ title: "Routes", value: "App Router route.ts handlers", icon: "🔌" }, { title: "Auth", value: "Supabase session checks", icon: "🔐" }, { title: "AI", value: "Anthropic API via user key", icon: "🧠" }, { title: "GitHub", value: "Octokit patterns", icon: "🐙" }] } },
+
+      // ── Skills ──
+      { id: "skills-dir", type: "configNode", position: { x: 1100, y: 870 }, data: { label: "skills/", configType: "skill", filePath: ".claude/skills/", description: "Auto-invoked workflows — triggered when touching specific areas of code", gitignored: false, sections: [{ title: "security-review/", value: "Triggers on auth/API/key changes", icon: "🔒" }, { title: "deploy/", value: "Railway deployment workflow", icon: "🚀" }] } },
+      { id: "skill-security", type: "configNode", position: { x: 1500, y: 1500 }, data: { label: "security-review/", configType: "skill", filePath: ".claude/skills/security-review/SKILL.md", description: "Auto-triggers when modifying auth, API keys, or sensitive data handling", gitignored: false, sections: [{ title: "Trigger", value: "Changes to auth/, api/, or key handling", icon: "⚡" }, { title: "Checks", value: "No secrets in code, proper validation", icon: "🔍" }, { title: "Action", value: "Flag issues, suggest fixes", icon: "🛡️" }] } },
+      { id: "skill-deploy", type: "configNode", position: { x: 1500, y: 1700 }, data: { label: "deploy/", configType: "skill", filePath: ".claude/skills/deploy/SKILL.md", description: "Deployment skill — automates build, verify, and push to Railway", gitignored: false, sections: [{ title: "Trigger", value: "/project:deploy or manual", icon: "▶" }, { title: "Pre-flight", value: "Build + type check + test", icon: "✅" }, { title: "Deploy", value: "git push → Railway auto-deploy", icon: "🚂" }, { title: "Verify", value: "Health check post-deploy", icon: "💚" }] } },
+
+      // ── Agents ──
+      { id: "agents-dir", type: "configNode", position: { x: 1100, y: 1080 }, data: { label: "agents/", configType: "agent", filePath: ".claude/agents/", description: "Subagent personas — isolated reviewers that run in parallel without polluting main context", gitignored: false, sections: [{ title: "code-reviewer.md", value: "Quality + stack pattern review", icon: "👁️" }, { title: "security-auditor.md", value: "API keys, auth, input sanitization", icon: "🔒" }] } },
+      { id: "agent-reviewer", type: "configNode", position: { x: 1500, y: 1880 }, data: { label: "code-reviewer.md", configType: "agent", filePath: ".claude/agents/code-reviewer.md", description: "Code review subagent — checks quality, patterns, and stack conventions in isolation", gitignored: false, sections: [{ title: "Focus", value: "Type safety, React patterns, Tailwind usage", icon: "🎯" }, { title: "Stack", value: "Next.js 15, React 19, TypeScript", icon: "📚" }, { title: "Output", value: "Structured review with severity levels", icon: "📊" }] } },
+      { id: "agent-auditor", type: "configNode", position: { x: 1500, y: 2070 }, data: { label: "security-auditor.md", configType: "agent", filePath: ".claude/agents/security-auditor.md", description: "Security audit subagent — checks for exposed keys, auth gaps, and input sanitization", gitignored: false, sections: [{ title: "Focus", value: "API keys, env vars, auth flows", icon: "🔐" }, { title: "Checks", value: "OWASP top 10, XSS, injection", icon: "🛡️" }, { title: "Output", value: "Security findings with risk levels", icon: "⚠️" }] } },
+
+      // ── Annotation notes ──
+      { id: "note-committed", type: "noteNode", position: { x: 350, y: 0 }, data: { label: "Committed", content: "Files without .gitignore badge are committed to git and shared with the team" } },
+      { id: "note-personal", type: "noteNode", position: { x: 350, y: 700 }, data: { label: "Personal / Gitignored", content: "Files with .gitignore badge are local-only — personal preferences and machine-specific config" } },
+    ],
+    edges: [
+      // Root → top-level files
+      { id: "e-root-md", source: "root", target: "claude-md", type: "smoothstep", animated: true, label: "team" },
+      { id: "e-root-local", source: "root", target: "claude-local", type: "smoothstep", animated: true, label: "personal", style: { strokeDasharray: "5 5" } },
+      { id: "e-root-dir", source: "root", target: "claude-dir", type: "smoothstep", animated: true, label: ".claude/" },
+
+      // .claude/ → sections
+      { id: "e-dir-settings", source: "claude-dir", target: "settings-json", type: "smoothstep", animated: true },
+      { id: "e-dir-slocal", source: "claude-dir", target: "settings-local", type: "smoothstep", animated: true, style: { strokeDasharray: "5 5" } },
+      { id: "e-dir-cmds", source: "claude-dir", target: "commands-dir", type: "smoothstep", animated: true },
+      { id: "e-dir-rules", source: "claude-dir", target: "rules-dir", type: "smoothstep", animated: true },
+      { id: "e-dir-skills", source: "claude-dir", target: "skills-dir", type: "smoothstep", animated: true },
+      { id: "e-dir-agents", source: "claude-dir", target: "agents-dir", type: "smoothstep", animated: true },
+
+      // Commands → children
+      { id: "e-cmds-review", source: "commands-dir", target: "cmd-review", type: "smoothstep", animated: true },
+      { id: "e-cmds-fix", source: "commands-dir", target: "cmd-fix", type: "smoothstep", animated: true },
+      { id: "e-cmds-deploy", source: "commands-dir", target: "cmd-deploy", type: "smoothstep", animated: true },
+
+      // Rules → children
+      { id: "e-rules-style", source: "rules-dir", target: "rule-style", type: "smoothstep", animated: true },
+      { id: "e-rules-test", source: "rules-dir", target: "rule-test", type: "smoothstep", animated: true },
+      { id: "e-rules-api", source: "rules-dir", target: "rule-api", type: "smoothstep", animated: true },
+
+      // Skills → children
+      { id: "e-skills-sec", source: "skills-dir", target: "skill-security", type: "smoothstep", animated: true },
+      { id: "e-skills-dep", source: "skills-dir", target: "skill-deploy", type: "smoothstep", animated: true },
+
+      // Agents → children
+      { id: "e-agents-rev", source: "agents-dir", target: "agent-reviewer", type: "smoothstep", animated: true },
+      { id: "e-agents-aud", source: "agents-dir", target: "agent-auditor", type: "smoothstep", animated: true },
     ],
   },
 
