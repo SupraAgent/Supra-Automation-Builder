@@ -3,6 +3,7 @@
  * Import individual registries or use mergeRegistries() to combine them.
  */
 import type { NodeRegistry } from "../core/types";
+import type { ConnectorOutput } from "../core/connector-sdk";
 
 export {
   SUPRATEAM_REGISTRY,
@@ -43,5 +44,89 @@ export function mergeRegistries(...registries: NodeRegistry[]): NodeRegistry {
     triggerConfigs: Object.assign({}, ...registries.map((r) => r.triggerConfigs ?? {})),
     actionConfigs: Object.assign({}, ...registries.map((r) => r.actionConfigs ?? {})),
     conditionFields: registries.flatMap((r) => r.conditionFields ?? []),
+  };
+}
+
+/**
+ * Register a connector (produced by `defineConnector()`) into an existing
+ * NodeRegistry. Validates that no duplicate subType IDs exist and returns
+ * a new registry with the connector's nodes, configs, and condition fields
+ * merged in.
+ *
+ * Throws if any of the connector's subTypes already exist in the registry.
+ */
+export function registerConnector(
+  registry: NodeRegistry,
+  connector: ConnectorOutput,
+): NodeRegistry {
+  // ── Validate connector ID is not already registered ─────────
+  const connectorPrefix = `${connector.id}:`;
+  const allExistingSubTypes = [
+    ...registry.triggers.map((t) => t.subType),
+    ...registry.actions.map((a) => a.subType),
+  ];
+  if (allExistingSubTypes.some((st) => st.startsWith(connectorPrefix))) {
+    throw new Error(
+      `registerConnector: connector "${connector.id}" is already registered (found existing subTypes with prefix "${connectorPrefix}")`,
+    );
+  }
+
+  // ── Validate no duplicate trigger subTypes ──────────────────
+  const existingTriggerSubTypes = new Set(registry.triggers.map((t) => t.subType));
+  const existingActionSubTypes = new Set(registry.actions.map((a) => a.subType));
+  const existingConfigSubTypes = new Set([
+    ...Object.keys(registry.triggerConfigs ?? {}),
+    ...Object.keys(registry.actionConfigs ?? {}),
+  ]);
+
+  for (const item of connector.paletteItems) {
+    if (item.type === "trigger" && existingTriggerSubTypes.has(item.subType)) {
+      throw new Error(
+        `registerConnector: duplicate trigger subType "${item.subType}" from connector "${connector.id}"`,
+      );
+    }
+    if (item.type === "action" && existingActionSubTypes.has(item.subType)) {
+      throw new Error(
+        `registerConnector: duplicate action subType "${item.subType}" from connector "${connector.id}"`,
+      );
+    }
+  }
+
+  for (const subType of Object.keys(connector.triggerConfigs)) {
+    if (existingConfigSubTypes.has(subType)) {
+      throw new Error(
+        `registerConnector: duplicate trigger config subType "${subType}" from connector "${connector.id}"`,
+      );
+    }
+  }
+
+  for (const subType of Object.keys(connector.actionConfigs)) {
+    if (existingConfigSubTypes.has(subType)) {
+      throw new Error(
+        `registerConnector: duplicate action config subType "${subType}" from connector "${connector.id}"`,
+      );
+    }
+  }
+
+  // ── Merge ───────────────────────────────────────────────────
+  const triggerItems = connector.paletteItems.filter((p) => p.type === "trigger");
+  const actionItems = connector.paletteItems.filter((p) => p.type === "action");
+
+  return {
+    triggers: [...registry.triggers, ...triggerItems],
+    actions: [...registry.actions, ...actionItems],
+    logic: registry.logic ?? [],
+    triggerConfigs: {
+      ...(registry.triggerConfigs ?? {}),
+      ...connector.triggerConfigs,
+    },
+    actionConfigs: {
+      ...(registry.actionConfigs ?? {}),
+      ...connector.actionConfigs,
+    },
+    conditionFields: [
+      ...(registry.conditionFields ?? []),
+      ...connector.conditionFields,
+    ],
   };
 }
