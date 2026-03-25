@@ -37,6 +37,10 @@ import { NodeInspector } from "./node-inspector";
 import { NodeContextMenu } from "./node-context-menu";
 import { TemplateManager } from "./template-manager";
 import type { FlowTemplate } from "@/lib/flow-templates";
+import {
+  builderTemplateToFlowNodes,
+  type BuilderTemplate,
+} from "@/lib/builder-templates";
 import { useUndoRedo } from "@/lib/use-undo-redo";
 import { autoLayout } from "@/lib/auto-layout";
 
@@ -62,6 +66,10 @@ type FlowCanvasProps = {
   category: FlowTemplate["category"];
   onNodesChange?: (nodes: Node[]) => void;
   onEdgesChange?: (edges: Edge[]) => void;
+  /** Ref to allow parent to merge nodes/edges additively */
+  mergeRef?: React.RefObject<{
+    mergeNodes: (newNodes: Node[], newEdges: Edge[]) => void;
+  } | null>;
 };
 
 export function FlowCanvas(props: FlowCanvasProps) {
@@ -72,11 +80,16 @@ export function FlowCanvas(props: FlowCanvasProps) {
   );
 }
 
+export type FlowCanvasMergeHandle = {
+  mergeNodes: (newNodes: Node[], newEdges: Edge[]) => void;
+};
+
 function FlowCanvasInner({
   initialTemplate,
   category,
   onNodesChange: onNodesChangeCb,
   onEdgesChange: onEdgesChangeCb,
+  mergeRef,
 }: FlowCanvasProps) {
   const { screenToFlowPosition, fitView, getNodes } = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState(
@@ -159,6 +172,36 @@ function FlowCanvasInner({
   const onDrop = React.useCallback(
     (event: React.DragEvent) => {
       event.preventDefault();
+
+      // Handle builder template drop
+      const builderTemplateStr = event.dataTransfer.getData(
+        "application/builder-template"
+      );
+      if (builderTemplateStr) {
+        try {
+          const template: BuilderTemplate = JSON.parse(builderTemplateStr);
+          const dropPos = screenToFlowPosition({
+            x: event.clientX,
+            y: event.clientY,
+          });
+          const { nodes: newNodes, edges: newEdges } =
+            builderTemplateToFlowNodes(template, 0);
+          // Offset all nodes to drop position
+          const adjusted = newNodes.map((n) => ({
+            ...n,
+            position: {
+              x: n.position.x + dropPos.x - 400,
+              y: n.position.y + dropPos.y - 250,
+            },
+          }));
+          setNodes((nds) => [...nds, ...adjusted]);
+          setEdges((eds) => [...eds, ...newEdges]);
+        } catch {
+          // ignore invalid data
+        }
+        return;
+      }
+
       const type = event.dataTransfer.getData("application/reactflow-type");
       const dataStr = event.dataTransfer.getData("application/reactflow-data");
       if (!type) return;
@@ -178,7 +221,7 @@ function FlowCanvasInner({
 
       setNodes((nds) => [...nds, newNode]);
     },
-    [setNodes, screenToFlowPosition]
+    [setNodes, setEdges, screenToFlowPosition]
   );
 
   const handleNodeClick = React.useCallback(
@@ -237,6 +280,24 @@ function FlowCanvasInner({
     },
     [setNodes, setEdges]
   );
+
+  // Merge nodes/edges additively (for builder templates)
+  const mergeNodesIntoCanvas = React.useCallback(
+    (newNodes: Node[], newEdges: Edge[]) => {
+      setNodes((nds) => [...nds, ...newNodes]);
+      setEdges((eds) => [...eds, ...newEdges]);
+    },
+    [setNodes, setEdges]
+  );
+
+  // Expose merge function to parent via ref
+  React.useEffect(() => {
+    if (mergeRef && "current" in mergeRef) {
+      (mergeRef as React.MutableRefObject<FlowCanvasMergeHandle | null>).current = {
+        mergeNodes: mergeNodesIntoCanvas,
+      };
+    }
+  }, [mergeRef, mergeNodesIntoCanvas]);
 
   function handleLoadTemplate(template: FlowTemplate) {
     setNodes(autoLayout(template.nodes));
