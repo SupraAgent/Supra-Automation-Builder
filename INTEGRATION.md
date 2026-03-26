@@ -557,33 +557,309 @@ These are exported for reference and can be used directly or extended.
 
 ---
 
-## Advanced Features
+## Expression Resolver
 
-### RBAC (Role-Based Access Control)
-
-```typescript
-import { RBACManager, RBACProvider, useRBAC } from "@supra/automation-builder";
-```
-
-Built-in permissions: `workflow:create`, `workflow:read`, `workflow:update`, `workflow:delete`, `workflow:execute`, `workflow:toggle`, `credential:*`, `template:*`, `history:*`, `admin:*`.
-
-### Execution History
+Safe `{{expression}}` resolver — no eval, no Function constructor. Resolves property paths against workflow execution context.
 
 ```typescript
-import { ExecutionHistoryStore } from "@supra/automation-builder";
+import {
+  resolveExpression,
+  resolveTemplate,
+  resolveAllValues,
+  type ExpressionContext,
+} from "@supra/automation-builder";
+
+const ctx: ExpressionContext = {
+  nodeOutputs: { node_1: { message: "hello", count: 42 } },
+  vars: { userId: "u_123" },
+  credentials: { slack: { token: "xoxb-..." } },
+  env: { API_URL: "https://api.example.com" },
+  currentNodeId: "node_2",
+};
+
+// Single expression
+resolveExpression("node_1.message", ctx);          // "hello"
+resolveExpression("vars.userId", ctx);              // "u_123"
+resolveExpression("env.API_URL", ctx);              // "https://api.example.com"
+
+// Template string (replaces all {{...}} placeholders)
+resolveTemplate("Hello {{vars.userId}}, count is {{node_1.count}}", ctx);
+
+// Recursively resolve all string values in an object
+resolveAllValues({ to: "{{vars.userId}}", body: "Count: {{node_1.count}}" }, ctx);
 ```
 
-localStorage-based execution history with filtering, stats, and time-series bucketing.
+---
 
-### Partner Applets
+## Smart Defaults
+
+Auto-fills config for newly dropped nodes based on workflow context.
 
 ```typescript
-import { AppletStore, EXAMPLE_APPLETS } from "@supra/automation-builder";
+import {
+  computeSmartDefaults,
+  detectUpstreamFromEdges,
+  BUILTIN_SMART_DEFAULT_RULES,
+  type SmartDefaultRule,
+  type SmartDefaultContext,
+} from "@supra/automation-builder";
+
+// Built-in rules:
+// - Same-connector prefill: copies config from existing nodes of the same connector family
+// - Upstream loop variable: auto-fills arrayExpression when dropped after a trigger
+// - Condition from upstream: pre-populates condition field from upstream node output
+
+// Custom rule
+const myRule: SmartDefaultRule = {
+  id: "myapp:default-channel",
+  nodeType: "action",
+  applies: (ctx) => ctx.newNodeSubType === "slack_send_message",
+  getDefaults: () => ({ channel: "#general" }),
+};
+
+// Pass custom rules to FlowCanvas
+<FlowCanvas smartDefaultRules={[myRule]} /* ... */ />
+
+// Or call directly
+const defaults = computeSmartDefaults(context);
+const upstreamId = detectUpstreamFromEdges(edges, nodeId);
 ```
 
-Marketplace-style pre-built workflow templates from partners.
+---
 
-### Template Import/Export
+## AI Features
+
+### AIExecutor
+
+Provider-agnostic LLM execution engine with automatic tool-use loop.
+
+```typescript
+import {
+  AIExecutor,
+  type AIProvider,
+  type AIChatRequest,
+  type AIChatResponse,
+  type AIChatChunk,
+  type AIChatMessage,
+  type AIExpressionContext,
+} from "@supra/automation-builder";
+
+// Implement the AIProvider interface to bridge to any LLM
+const myProvider: AIProvider = {
+  async chat(request: AIChatRequest): Promise<AIChatResponse> {
+    // Call OpenAI, Anthropic, etc.
+    return { content: "...", model: "gpt-4o", finishReason: "stop" };
+  },
+  // Optional streaming
+  async *chatStream(request: AIChatRequest): AsyncIterable<AIChatChunk> {
+    yield { content: "Hello" };
+    yield { content: " world", finishReason: "stop" };
+  },
+};
+
+// Pass to EngineConfig as aiProvider
+const engineConfig: EngineConfig = {
+  // ...
+  aiProvider: myProvider,
+};
+```
+
+### AISuggestionEngine
+
+Rule-based workflow analysis — no LLM dependency, purely structural/heuristic.
+
+```typescript
+import { AISuggestionEngine, type AISuggestion } from "@supra/automation-builder";
+
+const engine = new AISuggestionEngine();
+const suggestions: AISuggestion[] = engine.analyze(nodes, edges, (updatedNodes, updatedEdges) => {
+  // Called when user applies a suggestion
+  setNodes(updatedNodes);
+  setEdges(updatedEdges);
+});
+
+// Checks: unconnected nodes, missing error handling, missing condition branches,
+// rate limit opportunities, AI node validation, dead ends, parallel opportunities
+```
+
+### AISuggestionsPanel
+
+UI component displaying suggestions from the engine.
+
+```typescript
+import { AISuggestionsPanel, type AISuggestionsPanelProps } from "@supra/automation-builder";
+
+<AISuggestionsPanel
+  suggestions={suggestions}
+  onDismiss={(id) => dismissSuggestion(id)}
+  onApplyAll={() => applyAllSuggestions()}
+/>
+```
+
+### AIFlowChat
+
+Floating chat panel for AI-assisted workflow building. Consuming apps provide the AI backend.
+
+```typescript
+import {
+  AIFlowChat,
+  type AIFlowChatProps,
+  type AIFlowChatRequest,
+  type AIFlowChatResponse,
+  type AIFlowMessage,
+} from "@supra/automation-builder";
+
+<AIFlowChat
+  currentNodes={nodes}
+  currentEdges={edges}
+  onApplyFlow={(nodes, edges) => { setNodes(nodes); setEdges(edges); }}
+  onSendMessage={async (req: AIFlowChatRequest) => {
+    // req.message, req.currentNodes, req.currentEdges, req.history
+    const response = await callYourAIBackend(req);
+    return response; // { message: string, flowUpdate?: { nodes, edges }, error?: string }
+  }}
+  placeholder="Describe a workflow..."
+  title="AI Assistant"
+  subtitle="Build workflows with natural language"
+  welcomeMessage="What workflow would you like to build?"
+  buttonIcon="sparkles"
+/>
+```
+
+---
+
+## Database Connector Utilities
+
+Safe SQL/NoSQL query building with injection protection.
+
+```typescript
+import {
+  QueryBuilder,
+  WhereBuilder,
+  where,
+  sanitizeIdentifier,
+  validateMongoFilter,
+  validateMongoPipeline,
+  type BuiltQuery,
+  type MongoQuery,
+  type OrderByClause,
+} from "@supra/automation-builder";
+
+// SQL — all values parameterized ($1, $2, ...), never interpolated
+const query: BuiltQuery = new QueryBuilder()
+  .select("users")
+  .where(where().eq("status", "active").gt("age", 18))
+  .orderBy([{ column: "name", direction: "asc" }])
+  .limit(10)
+  .build();
+// query.sql = 'SELECT * FROM "users" WHERE "status" = $1 AND "age" > $2 ORDER BY "name" ASC LIMIT 10'
+// query.params = ["active", 18]
+
+// Identifier validation (prevents SQL injection via table/column names)
+sanitizeIdentifier("users");         // '"users"'
+sanitizeIdentifier("schema.table");  // '"schema"."table"'
+
+// MongoDB filter validation (blocks $where, dangerous $expr)
+validateMongoFilter({ status: "active" });  // OK
+validateMongoPipeline([{ $match: { status: "active" } }]);  // OK, blocks $out/$merge
+```
+
+---
+
+## Scheduler & Cron Utilities
+
+Zero-dependency cron parser, calendar converter, and schedule manager.
+
+```typescript
+import {
+  parseCronExpression,
+  getNextCronDate,
+  getNextNDates,
+  validateCronExpression,
+  cronToHumanReadable,
+  calendarToSchedule,
+  intervalToNextDate,
+  scheduleToHumanReadable,
+  ScheduleManager,
+  type CronParts,
+  type CronField,
+  type ScheduleFiredCallback,
+} from "@supra/automation-builder";
+
+// Parse and validate cron
+const parts: CronParts = parseCronExpression("0 9 * * 1-5");
+const { valid, error } = validateCronExpression("0 9 * * 1-5");
+
+// Human-readable descriptions
+cronToHumanReadable("0 9 * * 1-5");     // "At 09:00, Monday through Friday"
+scheduleToHumanReadable(scheduleConfig); // Description based on mode
+
+// Next execution dates
+const nextDate = getNextCronDate(parts);
+const next5 = getNextNDates(scheduleConfig, 5);
+
+// Calendar mode → cron conversion
+const cronExpr = calendarToSchedule({ frequency: "weekly", time: "09:00", dayOfWeek: 1 });
+
+// Interval → next date
+const nextRun = intervalToNextDate({ value: 30, unit: "minutes" }, lastRunDate);
+
+// ScheduleManager — manages active schedules with firing callbacks
+const manager = new ScheduleManager();
+manager.start(scheduleConfig, (firedAt) => {
+  console.log("Schedule fired at:", firedAt);
+});
+manager.stop();
+```
+
+Supports cron aliases: `@yearly`, `@monthly`, `@weekly`, `@daily`, `@hourly`.
+
+---
+
+## Workflow Portability
+
+Schema-versioned export/import, shareable links, and clipboard support.
+
+```typescript
+import {
+  WORKFLOW_SCHEMA_VERSION,        // "1.0.0"
+  exportWorkflow,
+  importWorkflow,
+  validateWorkflowSchema,
+  encodeWorkflowToLink,
+  decodeWorkflowFromLink,
+  copyWorkflowToClipboard,
+  pasteWorkflowFromClipboard,
+  type ExportedWorkflow,
+  type ImportWorkflowResult,
+  type SchemaValidationResult,
+  type WorkflowPortabilityMetadata,
+} from "@supra/automation-builder";
+
+// Export — strips runtime state and secrets from node data
+const exported: ExportedWorkflow = exportWorkflow(nodes, edges, { name: "My Workflow" });
+
+// Import — validates schema version and returns warnings
+const result: ImportWorkflowResult = importWorkflow(jsonString);
+// result.nodes, result.edges, result.metadata, result.warnings
+
+// Schema validation
+const { valid, errors }: SchemaValidationResult = validateWorkflowSchema(jsonString);
+
+// Shareable URL (base64-encoded in fragment)
+const url: string = encodeWorkflowToLink(nodes, edges, "https://myapp.com/import");
+const decoded: ImportWorkflowResult = decodeWorkflowFromLink(url);
+
+// Clipboard
+await copyWorkflowToClipboard(nodes, edges);
+const pasted: ImportWorkflowResult = await pasteWorkflowFromClipboard();
+```
+
+---
+
+## Template Utilities (extended)
+
+Beyond the basic `exportTemplate`/`importTemplate` already documented:
 
 ```typescript
 import {
@@ -592,10 +868,427 @@ import {
   validateTemplate,
   encodeTemplateToUrl,
   decodeTemplateFromUrl,
+  workflowToTemplate,
+  getNextCopyName,
+  copyTemplateForUse,
+  type ExportTemplateInput,
+  type ImportTemplateResult,
+} from "@supra/automation-builder";
+
+// Convert workflow to template
+const template = workflowToTemplate(workflowData, { author: "Jon", category: "crm" });
+
+// Auto-increment copy names
+getNextCopyName("My Template", existingNames); // "My Template_001", "My Template_002", etc.
+
+// Copy for immediate use (generates new IDs)
+const copy = copyTemplateForUse(template);
+```
+
+---
+
+## Data Transform Pipeline
+
+Apply a sequence of transform operations to data — no eval, safe expression parsing.
+
+```typescript
+import { applyTransformPipeline } from "@supra/automation-builder";
+import type { TransformOperation, TransformResult } from "@supra/automation-builder";
+
+const ops: TransformOperation[] = [
+  { type: "filter", expression: "item.active == true" },
+  { type: "sort", key: "name", direction: "asc" },
+  { type: "pick", keys: ["name", "email"] },
+  { type: "take", count: 10 },
+];
+
+const result: TransformResult = applyTransformPipeline(inputData, ops, expressionContext);
+// result.success, result.output, result.operationsApplied, result.error
+```
+
+Available operations: `map`, `filter`, `sort`, `pick`, `omit`, `rename`, `flatten`, `group_by`, `aggregate`, `template`, `json_parse`, `json_stringify`, `unique`, `take`, `skip`.
+
+---
+
+## Sub-Workflow Validation
+
+```typescript
+import {
+  validateSubWorkflow,
+  type SubWorkflowValidationResult,
+} from "@supra/automation-builder";
+
+const result: SubWorkflowValidationResult = validateSubWorkflow(workflowData, parentWorkflowId);
+// Checks: no delay nodes, no self-referencing sub_workflow nodes, required config fields present
+```
+
+---
+
+## Rate Limiter
+
+Token bucket algorithm — injectable on EngineConfig, shared across workflow runs.
+
+```typescript
+import {
+  TokenBucketRateLimiter,
+  type RateLimitConfig,
+  type RateLimitAcquireResult,
+  type RateLimitStatus,
+} from "@supra/automation-builder";
+
+const limiter = new TokenBucketRateLimiter({
+  maxTokens: 20,
+  refillRate: 10,                  // tokens per second
+  strategy: "wait",                // "wait" | "skip" | "fail"
+  perActionOverrides: {
+    slack_send_message: { maxTokens: 5, refillRate: 1 },
+  },
+});
+
+// Use standalone
+const result: RateLimitAcquireResult = await limiter.acquire("send_email");
+const status: RateLimitStatus = limiter.status("send_email");
+
+// Or inject into engine — auto-applied before every action node
+const engineConfig: EngineConfig = { /* ... */ rateLimiter: limiter };
+```
+
+---
+
+## Logging & Observability
+
+### ConsoleLogger
+
+Ready-to-use ExecutionLogger with timestamps and automatic secret redaction.
+
+```typescript
+import { ConsoleLogger } from "@supra/automation-builder";
+
+const engineConfig: EngineConfig = {
+  // ...
+  logger: new ConsoleLogger(),
+  // Redacts values where key matches: token, key, secret, password
+};
+```
+
+### Plain-Language Formatting
+
+```typescript
+import { formatRunSummary, formatNodeEvent, formatDuration } from "@supra/automation-builder";
+
+formatDuration(65000);                    // "1m 5s"
+formatRunSummary(executionRecord);        // "Completed in 1m 5s — 4 nodes, 0 errors"
+formatNodeEvent(nodeEvent);              // "send_email completed in 230ms"
+```
+
+---
+
+## RBAC (Role-Based Access Control)
+
+```typescript
+import {
+  RBACManager,
+  BUILTIN_ADMIN_ROLE,
+  BUILTIN_EDITOR_ROLE,
+  BUILTIN_VIEWER_ROLE,
+  BUILTIN_OPERATOR_ROLE,
+  RBACProvider,
+  RBACContext,
+  useRBAC,
+  type RBACProviderProps,
+} from "@supra/automation-builder";
+
+// Built-in roles with pre-configured permissions
+// Admin: all permissions
+// Editor: workflow CRUD + templates + credentials
+// Viewer: read-only access
+// Operator: execute + toggle + read
+
+// Wrap your app to enforce permissions in components
+<RBACProvider manager={rbacManager} userId="user_123">
+  {/* useRBAC() hook available in children */}
+</RBACProvider>
+```
+
+Built-in permissions: `workflow:create`, `workflow:read`, `workflow:update`, `workflow:delete`, `workflow:execute`, `workflow:toggle`, `credential:*`, `template:*`, `history:*`, `admin:*`.
+
+---
+
+## Execution History
+
+```typescript
+import {
+  ExecutionHistoryStore,
+  ExecutionHistoryPanel,
+  type ExecutionHistoryPanelProps,
+} from "@supra/automation-builder";
+
+// Store implements ExecutionLogger — plug directly into engine
+const historyStore = new ExecutionHistoryStore();
+const engineConfig: EngineConfig = { /* ... */ logger: historyStore };
+
+// Query runs
+const { records, total, stats } = historyStore.query({
+  workflowId: "wf_123",
+  status: "failed",
+  dateRange: { start: "2026-03-01", end: "2026-03-26" },
+  limit: 20,
+});
+
+// UI component
+<ExecutionHistoryPanel
+  store={historyStore}
+  workflowId="wf_123"
+/>
+```
+
+---
+
+## Partner Applets
+
+```typescript
+import {
+  AppletStore,
+  EXAMPLE_APPLETS,
+  AppletMarketplace,
+  AppletConfigModal,
+  AppletInstances,
+  type AppletMarketplaceProps,
+  type AppletConfigModalProps,
+  type AppletInstancesProps,
+} from "@supra/automation-builder";
+
+// AppletStore manages applet catalog + installed instances
+const store = new AppletStore(EXAMPLE_APPLETS);
+
+// Marketplace UI — browse and install
+<AppletMarketplace store={store} onInstall={(applet, config) => { /* ... */ }} />
+
+// Config modal — shown when installing/editing an applet
+<AppletConfigModal applet={selectedApplet} onSave={(config) => { /* ... */ }} onClose={() => {}} />
+
+// Instances list — manage installed applets
+<AppletInstances store={store} onToggle={(id, enabled) => { /* ... */ }} onDelete={(id) => { /* ... */ }} />
+```
+
+---
+
+## Workflow Dashboard
+
+```typescript
+import {
+  WorkflowDashboard,
+  type WorkflowDashboardProps,
+  type WorkflowSummary,
+} from "@supra/automation-builder";
+
+<WorkflowDashboard
+  workflows={workflows}
+  onSelect={(id) => navigate(`/workflows/${id}`)}
+  onToggle={(id, enabled) => toggleWorkflow(id, enabled)}
+  onDelete={(id) => deleteWorkflow(id)}
+/>
+```
+
+---
+
+## Node Components
+
+Individual node renderers — exported for custom composition via `customNodeTypes`. FlowCanvas registers all of these by default, so you only need these if building a custom canvas layout.
+
+```typescript
+import {
+  TriggerNode,
+  ActionNode,
+  ConditionNode,
+  DelayNode,
+  TryCatchNode,
+  CodeNode,
+  SwitchNode,
+  LoopNode,
+  TransformNode,
+  SubWorkflowNode,
+  ScheduleNode,
+  DatabaseNode,
+  AINode,
+  GroupContainerNode,
+} from "@supra/automation-builder";
+
+// Override specific node renderers
+<FlowCanvas customNodeTypes={{ action: MyCustomActionNode }} /* ... */ />
+```
+
+---
+
+## Additional UI Components
+
+### NodeSidebar
+
+Draggable node palette. Rendered automatically inside FlowCanvas (hide with `hideSidebar`). Exported for standalone use.
+
+```typescript
+import { NodeSidebar } from "@supra/automation-builder";
+```
+
+### NodeConfigPanel
+
+Node property editor. Rendered automatically inside FlowCanvas (hide with `hideConfigPanel`). Exported for standalone use.
+
+```typescript
+import { NodeConfigPanel } from "@supra/automation-builder";
+```
+
+### NodeContextMenu
+
+Right-click context menu. Enabled by default in FlowCanvas (`enableContextMenu`). Exported for custom integration.
+
+```typescript
+import {
+  NodeContextMenu,
+  type NodeContextMenuProps,
+  type ContextMenuItem,
 } from "@supra/automation-builder";
 ```
 
-Share templates as JSON or URL-encoded links.
+### TemplateBrowser
+
+Lightweight read-only template browsing component (alternative to the full TemplateManager).
+
+```typescript
+import { TemplateBrowser, type TemplateBrowserProps } from "@supra/automation-builder";
+```
+
+---
+
+## BuilderProvider & Context
+
+Components like NodeSidebar, NodeConfigPanel, and built-in node renderers (TriggerNode, ActionNode) use `useBuilderContext()` internally. This requires a `BuilderProvider` ancestor.
+
+```typescript
+import {
+  BuilderProvider,
+  useBuilderContext,
+  type BuilderProviderProps,
+} from "@supra/automation-builder";
+
+<BuilderProvider
+  registry={myRegistry}
+  iconMap={{ Play: PlayIcon, Mail: MailIcon }}  // Optional: map icon names → React components
+>
+  <FlowCanvas /* ... */ />
+</BuilderProvider>
+```
+
+---
+
+## CPO Personas
+
+Pre-built Chief Product Officer decision-making personas for agent-driven automation design.
+
+```typescript
+import {
+  CPO_N8N,
+  CPO_IFTTT,
+  CPO_CRYPTO_AUTOMATION,
+  type CPOPersona,
+  type ProductThesis,
+  type DecisionHeuristic,
+  type StrategicPriority,
+} from "@supra/automation-builder";
+
+// Each persona has: id, name, title, org, bio, thesis, heuristics, priorities, evaluationPrompt, voice
+```
+
+---
+
+## Registry Utilities
+
+```typescript
+import { mergeRegistries, registerConnector } from "@supra/automation-builder";
+
+// Merge multiple registries into one
+const combined = mergeRegistries(SUPRATEAM_REGISTRY, SUPRALOOP_REGISTRY);
+
+// Register a connector (from defineConnector) into an existing registry
+// Validates no duplicate subTypes, throws if conflicts found
+const extended = registerConnector(myRegistry, myConnector);
+```
+
+Each pre-built registry also exports granular pieces:
+
+```typescript
+import {
+  SUPRATEAM_REGISTRY, SUPRATEAM_TRIGGERS, SUPRATEAM_ACTIONS,
+  SUPRALOOP_REGISTRY, SUPRALOOP_TRIGGERS, SUPRALOOP_ACTIONS,
+  AUTOPURCHASER_REGISTRY, AUTOPURCHASER_TRIGGERS, AUTOPURCHASER_ACTIONS,
+} from "@supra/automation-builder";
+```
+
+---
+
+## Built-in Connectors
+
+```typescript
+import { webhookConnector } from "@supra/automation-builder";
+
+// Pre-built webhook connector — register into any registry
+const registry = registerConnector(myRegistry, webhookConnector);
+```
+
+---
+
+## Utility Exports
+
+```typescript
+import { cn } from "@supra/automation-builder";             // clsx + tailwind-merge
+import { DEFAULT_OPERATORS } from "@supra/automation-builder"; // Default condition operators
+import { defaultRenderTemplate } from "@supra/automation-builder"; // Simple {{var}} replacer
+```
+
+`DEFAULT_OPERATORS` provides: Equals, Not Equals, Contains, Not Contains, Starts With, Greater Than, Less Than, Greater or Equal, Less or Equal, Is Empty, Is Not Empty.
+
+---
+
+## Complete Export Index
+
+Every public export from `@supra/automation-builder`, organized by module:
+
+| Module | Exports |
+|--------|---------|
+| **Core Types** | `WorkflowNodeType`, `TriggerNodeData`, `ActionNodeData`, `ConditionNodeData`, `DelayNodeData`, `TryCatchNodeData`, `CodeNodeData`, `SwitchNodeData`, `LoopNodeData`, `TransformNodeData`, `SubWorkflowNodeData`, `ScheduleNodeData`, `DatabaseNodeData`, `AINodeData`, `GroupContainerNodeData`, `WorkflowNodeData`, `ConditionConfig`, `DelayConfig`, `TryCatchConfig`, `CodeConfig`, `SwitchConfig`, `SwitchCase`, `LoopConfig`, `TransformConfig`, `TransformOperation`, `TransformResult`, `AggregateOp`, `SubWorkflowConfig`, `WorkflowResolver`, `ScheduleConfig`, `ScheduleState`, `ScheduleIntervalConfig`, `ScheduleCalendarConfig`, `DatabaseConfig`, `DatabaseOperation`, `DatabaseConnectorType`, `DatabaseResult`, `DatabaseAdapter`, `ConditionOperator`, `RetryConfig`, `DEFAULT_OPERATORS` |
+| **AI Types** | `AINodeConfig`, `AITool`, `AIToolCall`, `AINodeResult`, `AISuggestion` |
+| **Group Container** | `GroupContainerChild` |
+| **Registry Types** | `NodePaletteItem`, `ConfigFieldDef`, `NodeTypeRegistration`, `NodeRegistry` |
+| **Workflow Types** | `WorkflowData`, `FlowNode`, `FlowEdge` |
+| **Engine** | `executeWorkflow()`, `resumeWorkflow()`, `evaluateCondition()`, `defaultRenderTemplate()`, `EngineConfig` |
+| **Engine Types** | `WorkflowEvent`, `ActionContext`, `ActionResult`, `ActionExecutor`, `PersistenceAdapter`, `RunResult`, `NodeTiming` |
+| **Credentials** | `StoredCredential`, `CredentialStore`, `CredentialRef` |
+| **Streaming** | `StreamChunk`, `StreamingActionResult`, `OnStreamCallback` |
+| **Logging** | `ExecutionLogger`, `ConsoleLogger` |
+| **Expression Resolver** | `resolveExpression()`, `resolveTemplate()`, `resolveAllValues()`, `ExpressionContext` |
+| **AI Executor** | `AIExecutor`, `AIProvider`, `AIChatRequest`, `AIChatResponse`, `AIChatChunk`, `AIChatMessage`, `AIExpressionContext` |
+| **AI Suggestions** | `AISuggestionEngine` |
+| **Database Connector** | `QueryBuilder`, `WhereBuilder`, `where()`, `sanitizeIdentifier()`, `validateMongoFilter()`, `validateMongoPipeline()`, `BuiltQuery`, `MongoQuery`, `OrderByClause` |
+| **Sub-Workflow** | `validateSubWorkflow()`, `SubWorkflowValidationResult` |
+| **Data Mapper** | `applyTransformPipeline()` |
+| **Rate Limiter** | `TokenBucketRateLimiter`, `RateLimitConfig`, `RateLimitAcquireResult`, `RateLimitStatus` |
+| **Smart Defaults** | `computeSmartDefaults()`, `detectUpstreamFromEdges()`, `BUILTIN_SMART_DEFAULT_RULES`, `SmartDefaultContext`, `SmartDefaultRule` |
+| **Scheduler** | `parseCronExpression()`, `getNextCronDate()`, `getNextNDates()`, `validateCronExpression()`, `cronToHumanReadable()`, `calendarToSchedule()`, `intervalToNextDate()`, `scheduleToHumanReadable()`, `ScheduleManager`, `CronParts`, `CronField`, `ScheduleFiredCallback` |
+| **Execution History** | `ExecutionHistoryStore`, `ExecutionRecord`, `NodeExecutionEvent`, `ExecutionHistoryQuery`, `ExecutionHistoryResult`, `ExecutionStats`, `TimeSeriesBucket`, `SerializedHistory` |
+| **Plain Language** | `formatRunSummary()`, `formatNodeEvent()`, `formatDuration()` |
+| **RBAC** | `RBACManager`, `BUILTIN_ADMIN_ROLE`, `BUILTIN_EDITOR_ROLE`, `BUILTIN_VIEWER_ROLE`, `BUILTIN_OPERATOR_ROLE`, `Permission`, `Role`, `User`, `RBACConfig`, `SerializedRBAC` |
+| **Portability** | `WORKFLOW_SCHEMA_VERSION`, `exportWorkflow()`, `importWorkflow()`, `validateWorkflowSchema()`, `encodeWorkflowToLink()`, `decodeWorkflowFromLink()`, `copyWorkflowToClipboard()`, `pasteWorkflowFromClipboard()`, `ExportedWorkflow`, `ImportWorkflowResult`, `SchemaValidationResult`, `WorkflowPortabilityMetadata` |
+| **Template Utils** | `exportTemplate()`, `importTemplate()`, `validateTemplate()`, `encodeTemplateToUrl()`, `decodeTemplateFromUrl()`, `workflowToTemplate()`, `getNextCopyName()`, `copyTemplateForUse()`, `ExportTemplateInput`, `ImportTemplateResult` |
+| **Template Marketplace** | `TemplateManifest`, `ShareableTemplate`, `TemplateValidationResult` |
+| **Connector SDK** | `defineConnector()`, `ConnectorAuthType`, `ConnectorAuthField`, `ConnectorAuthConfig`, `ConnectorTrigger`, `ConnectorAction`, `ConnectorActionExecutor`, `ConnectorActionExecutorResult`, `ConnectorDefinition`, `ConnectorOutput`, `CredentialDefinition`, `ConnectorManifest` |
+| **Partner Applets** | `AppletStore`, `EXAMPLE_APPLETS`, `PartnerApplet`, `AppletConfigField`, `AppletInstance`, `PartnerRegistry`, `AppletSearchQuery`, `AppletSearchResult`, `SerializedAppletStore` |
+| **Personas** | `CPO_N8N`, `CPO_IFTTT`, `CPO_CRYPTO_AUTOMATION`, `CPOPersona`, `ProductThesis`, `DecisionHeuristic`, `StrategicPriority` |
+| **Registries** | `SUPRATEAM_REGISTRY`, `SUPRATEAM_TRIGGERS`, `SUPRATEAM_ACTIONS`, `SUPRALOOP_REGISTRY`, `SUPRALOOP_TRIGGERS`, `SUPRALOOP_ACTIONS`, `AUTOPURCHASER_REGISTRY`, `AUTOPURCHASER_TRIGGERS`, `AUTOPURCHASER_ACTIONS`, `mergeRegistries()`, `registerConnector()` |
+| **Connectors** | `webhookConnector` |
+| **Components** | `FlowCanvas`, `NodeSidebar`, `NodeConfigPanel`, `BuilderProvider`, `useBuilderContext`, `TemplateManager`, `TemplateBrowser`, `NodeContextMenu`, `AIFlowChat`, `AISuggestionsPanel`, `ExecutionHistoryPanel`, `WorkflowDashboard`, `AppletMarketplace`, `AppletConfigModal`, `AppletInstances`, `RBACProvider`, `RBACContext`, `useRBAC` |
+| **Node Components** | `TriggerNode`, `ActionNode`, `ConditionNode`, `DelayNode`, `TryCatchNode`, `CodeNode`, `SwitchNode`, `LoopNode`, `TransformNode`, `SubWorkflowNode`, `ScheduleNode`, `DatabaseNode`, `AINode`, `GroupContainerNode` |
+| **Undo/Redo** | `useUndoRedo` |
+| **Utilities** | `cn()` |
 
 ---
 
