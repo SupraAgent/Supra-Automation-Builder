@@ -434,9 +434,17 @@ export interface NodePaletteItem {
 export interface ConfigFieldDef {
   key: string;
   label: string;
-  type: "text" | "textarea" | "number" | "select" | "secret";
+  type: "text" | "textarea" | "number" | "select" | "async_select" | "secret";
   placeholder?: string;
   options?: { value: string; label: string }[]; // for select type
+  /** URL to fetch options from at runtime (for async_select) */
+  optionsUrl?: string;
+  /** Map raw API response items to { value, label } for async_select */
+  mapOption?: (item: Record<string, unknown>) => { value: string; label: string };
+  /** URL to POST to create a new option (for async_select with inline create) */
+  createUrl?: string;
+  /** Field mapping for inline create (maps value/label keys in the created record) */
+  createFields?: { valueKey: string; labelKey: string };
   defaultValue?: string | number;
   /** When set, this field can be populated from a stored credential */
   credentialRef?: {
