@@ -20,6 +20,7 @@
   ],
   "scripts": {
     "build": "tsup",
+    "prepare": "tsup",
     "dev": "tsup --watch",
     "lint": "tsc --noEmit",
     "clean": "rm -rf dist"
