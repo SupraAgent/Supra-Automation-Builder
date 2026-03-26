@@ -47,7 +47,7 @@ import {
   getNodesCenter,
   type BuilderTemplate,
 } from "@/lib/builder-templates";
-import { useUndoRedo } from "@/lib/use-undo-redo";
+import { useUndoRedo } from "@supra/automation-builder";
 import { useClipboard } from "@/lib/use-clipboard";
 import {
   useNodeGroups,
