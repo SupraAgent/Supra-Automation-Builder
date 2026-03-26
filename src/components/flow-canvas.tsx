@@ -89,6 +89,8 @@ export interface FlowCanvasProps {
   onExternalApply?: (detail: { nodes: Node[]; edges: Edge[]; action: "add" | "replace" }) => void;
   /** Custom event name to listen for on window. When fired, calls onExternalApply with the event detail. */
   externalApplyEvent?: string;
+  /** Skip auto-layout on initial nodes. Use when loading saved layouts that should be preserved. Default: false */
+  disableAutoLayout?: boolean;
 }
 
 function getNodeId() {
@@ -113,8 +115,9 @@ function FlowCanvasInner({
   canvasStateKey,
   onExternalApply,
   externalApplyEvent,
+  disableAutoLayout = false,
 }: FlowCanvasProps) {
-  const [nodes, setNodes, onNodesChange] = useNodesState(autoLayout(initialNodes));
+  const [nodes, setNodes, onNodesChange] = useNodesState(disableAutoLayout ? initialNodes : autoLayout(initialNodes));
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [selectedNode, setSelectedNode] = React.useState<Node | null>(null);
   // Unique ID to scope group-add-child events to this canvas instance
