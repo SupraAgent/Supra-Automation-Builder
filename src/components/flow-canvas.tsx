@@ -85,6 +85,10 @@ export interface FlowCanvasProps {
   enableContextMenu?: boolean;
   /** When set, exposes { nodes, edges } on window[canvasStateKey] for external integrations (e.g. AI chat). */
   canvasStateKey?: string;
+  /** Called when an external system wants to apply nodes/edges to the canvas (e.g. AI chat "Apply" button). */
+  onExternalApply?: (detail: { nodes: Node[]; edges: Edge[]; action: "add" | "replace" }) => void;
+  /** Custom event name to listen for on window. When fired, calls onExternalApply with the event detail. */
+  externalApplyEvent?: string;
 }
 
 function getNodeId() {
@@ -107,6 +111,8 @@ function FlowCanvasInner({
   showUndoRedoButtons = true,
   enableContextMenu = true,
   canvasStateKey,
+  onExternalApply,
+  externalApplyEvent,
 }: FlowCanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState(autoLayout(initialNodes));
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -135,7 +141,34 @@ function FlowCanvasInner({
   React.useEffect(() => {
     if (!canvasStateKey) return;
     (window as unknown as Record<string, unknown>)[canvasStateKey] = { nodes, edges };
+    return () => { delete (window as unknown as Record<string, unknown>)[canvasStateKey]; };
   }, [canvasStateKey, nodes, edges]);
+
+  // Listen for external apply events (e.g. AI chat widget "Apply to Canvas" button)
+  React.useEffect(() => {
+    if (!externalApplyEvent) return;
+    function handleApply(e: Event) {
+      const detail = (e as CustomEvent).detail as {
+        nodes: Node[];
+        edges: Edge[];
+        action: "add" | "replace";
+      };
+      if (onExternalApply) {
+        onExternalApply(detail);
+      } else {
+        // Default behavior: add or replace nodes/edges directly
+        if (detail.action === "replace") {
+          setNodes(detail.nodes);
+          setEdges(detail.edges);
+        } else {
+          setNodes((prev) => [...prev, ...detail.nodes]);
+          setEdges((prev) => [...prev, ...detail.edges]);
+        }
+      }
+    }
+    window.addEventListener(externalApplyEvent, handleApply);
+    return () => window.removeEventListener(externalApplyEvent, handleApply);
+  }, [externalApplyEvent, onExternalApply, setNodes, setEdges]);
 
   // Listen for group container child additions (scoped to this canvas instance)
   React.useEffect(() => {
