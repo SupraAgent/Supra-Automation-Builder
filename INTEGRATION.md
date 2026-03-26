@@ -94,6 +94,7 @@ Each consuming app provides its own:
 
 import {
   FlowCanvas,
+  BuilderProvider,
   type NodeRegistry,
 } from "@supra/automation-builder";
 
@@ -122,19 +123,23 @@ const registry: NodeRegistry = {
 
 export default function BuilderPage() {
   return (
-    <FlowCanvas
-      initialNodes={[]}
-      initialEdges={[]}
-      onSave={(nodes, edges) => {
-        console.log("Saved:", { nodes, edges });
-      }}
-      registry={registry}
-      enableUndoRedo
-      showUndoRedoButtons
-    />
+    <BuilderProvider registry={registry}>
+      <FlowCanvas
+        initialNodes={[]}
+        initialEdges={[]}
+        onSave={(nodes, edges) => {
+          console.log("Saved:", { nodes, edges });
+        }}
+        registry={registry}
+        enableUndoRedo
+        showUndoRedoButtons
+      />
+    </BuilderProvider>
   );
 }
 ```
+
+> **Important:** `FlowCanvas` must be wrapped in a `BuilderProvider`. The sidebar and config panel use `useBuilderContext()` internally, which requires this provider as an ancestor.
 
 ### FlowCanvas Props
 
@@ -394,7 +399,7 @@ const engineConfig: EngineConfig = {
   // Template rendering for message actions
   renderTemplate: (template, vars) => renderMyTemplate(template, vars),
 
-  // Retry failed actions (default: 0)
+  // Retry failed actions (default: 2)
   maxRetries: 3,
 
   // Resolve stored credentials (API keys, tokens)
@@ -406,6 +411,9 @@ const engineConfig: EngineConfig = {
     onNodeComplete: (runId, nodeId, output, durationMs) => console.log(`[${runId}] done in ${durationMs}ms`),
     onNodeError: (runId, nodeId, error) => console.error(`[${runId}] ${error}`),
   },
+
+  // Streaming callback for AI/LLM actions
+  onStream: (nodeId, chunk) => console.log(`[${nodeId}] ${chunk.content}`),
 
   // Rate limiting for API-heavy actions
   rateLimiter: new TokenBucketRateLimiter({ tokensPerSecond: 10, maxBurst: 20 }),
@@ -542,6 +550,7 @@ The package includes pre-built registries for current consumers:
 | Registry | Import | App |
 |----------|--------|-----|
 | `SUPRATEAM_REGISTRY` | `@supra/automation-builder` | SupraTeam CRM |
+| `SUPRALOOP_REGISTRY` | `@supra/automation-builder` | SupraLoop |
 | `AUTOPURCHASER_REGISTRY` | `@supra/automation-builder` | LeeJones Auto Purchaser |
 
 These are exported for reference and can be used directly or extended.
