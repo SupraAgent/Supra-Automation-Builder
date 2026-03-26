@@ -40,6 +40,7 @@ import type { WorkflowNodeData, NodeRegistry, FlowNode as CoreFlowNode, FlowEdge
 import { autoLayout } from "../core/auto-layout";
 import { computeSmartDefaults, detectUpstreamFromEdges, type SmartDefaultRule } from "../core/smart-defaults";
 import { useUndoRedo } from "../core/use-undo-redo";
+import { NodeContextMenu } from "./node-context-menu";
 
 const nodeTypes: NodeTypes = {
   trigger: TriggerNode,
@@ -79,6 +80,8 @@ export interface FlowCanvasProps {
   enableUndoRedo?: boolean;
   /** Show undo/redo buttons in the toolbar. Default: true when enableUndoRedo is true */
   showUndoRedoButtons?: boolean;
+  /** Enable right-click context menu on nodes (Edit, Duplicate, Delete). Default: true */
+  enableContextMenu?: boolean;
 }
 
 function getNodeId() {
@@ -99,10 +102,16 @@ function FlowCanvasInner({
   smartDefaultRules,
   enableUndoRedo = true,
   showUndoRedoButtons = true,
+  enableContextMenu = true,
 }: FlowCanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState(autoLayout(initialNodes));
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [selectedNode, setSelectedNode] = React.useState<Node | null>(null);
+  const [contextMenu, setContextMenu] = React.useState<{
+    nodeId: string;
+    x: number;
+    y: number;
+  } | null>(null);
   const reactFlowWrapper = React.useRef<HTMLDivElement>(null);
   const [reactFlowInstance, setReactFlowInstance] = React.useState<ReturnType<typeof import("@xyflow/react").useReactFlow> | null>(null);
 
@@ -291,10 +300,6 @@ function FlowCanvasInner({
     setSelectedNode(node);
   }, []);
 
-  const onPaneClick = React.useCallback(() => {
-    setSelectedNode(null);
-  }, []);
-
   const onNodeDataChange = React.useCallback(
     (nodeId: string, newData: WorkflowNodeData) => {
       setNodes((nds) =>
@@ -318,6 +323,37 @@ function FlowCanvasInner({
     [setNodes, setEdges]
   );
 
+  const onDuplicateNode = React.useCallback(
+    (nodeId: string) => {
+      setNodes((nds) => {
+        const src = nds.find((n) => n.id === nodeId);
+        if (!src) return nds;
+        const dup: Node = {
+          id: getNodeId(),
+          type: src.type,
+          position: { x: src.position.x + 40, y: src.position.y + 40 },
+          data: { ...src.data },
+        };
+        return [...nds, dup];
+      });
+    },
+    [setNodes]
+  );
+
+  const onNodeContextMenu = React.useCallback(
+    (event: React.MouseEvent, node: Node) => {
+      if (!enableContextMenu) return;
+      event.preventDefault();
+      setContextMenu({ nodeId: node.id, x: event.clientX, y: event.clientY });
+    },
+    [enableContextMenu]
+  );
+
+  const onPaneClickWrapped = React.useCallback(() => {
+    setSelectedNode(null);
+    setContextMenu(null);
+  }, []);
+
   return (
     <div className="flex h-full">
       {!hideSidebar && <NodeSidebar />}
@@ -333,7 +369,8 @@ function FlowCanvasInner({
           onDrop={onDrop}
           onDragOver={onDragOver}
           onNodeClick={onNodeClick}
-          onPaneClick={onPaneClick}
+          onPaneClick={onPaneClickWrapped}
+          onNodeContextMenu={onNodeContextMenu}
           nodeTypes={mergedNodeTypes}
           colorMode="dark"
           fitView
@@ -378,6 +415,28 @@ function FlowCanvasInner({
           node={selectedNode}
           onDataChange={onNodeDataChange}
           onDelete={onDeleteNode}
+        />
+      )}
+
+      {/* Context Menu */}
+      {contextMenu && (
+        <NodeContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onEdit={() => {
+            const node = nodes.find((n) => n.id === contextMenu.nodeId);
+            if (node) setSelectedNode(node);
+            setContextMenu(null);
+          }}
+          onDuplicate={() => {
+            onDuplicateNode(contextMenu.nodeId);
+            setContextMenu(null);
+          }}
+          onDelete={() => {
+            onDeleteNode(contextMenu.nodeId);
+            setContextMenu(null);
+          }}
+          onClose={() => setContextMenu(null)}
         />
       )}
 

@@ -411,6 +411,56 @@ export function decodeTemplateFromUrl(urlFragment: string): ShareableTemplate {
   return template;
 }
 
+// ── Template Copy-on-Use ─────────────────────────────────────────
+
+/**
+ * Generate the next copy name with auto-incrementing suffix.
+ * "My Template" → "My Template_001", "My Template_001" → "My Template_002"
+ */
+export function getNextCopyName(
+  baseName: string,
+  existingNames: string[]
+): string {
+  // Strip existing _NNN suffix
+  const stripped = baseName.replace(/_\d{3}$/, "");
+  const nameSet = new Set(existingNames);
+
+  let counter = 1;
+  let candidate = `${stripped}_${String(counter).padStart(3, "0")}`;
+  while (nameSet.has(candidate)) {
+    counter++;
+    candidate = `${stripped}_${String(counter).padStart(3, "0")}`;
+  }
+  return candidate;
+}
+
+/**
+ * Deep-copy a template with new IDs and a copy-suffixed name.
+ * Returns a new template that's safe to mutate independently.
+ */
+export function copyTemplateForUse<
+  T extends { id: string; name: string; nodes: FlowNode[]; edges: FlowEdge[] }
+>(template: T, existingNames: string[]): T & { id: string; name: string } {
+  const now = Date.now();
+  const newId = `copy_${now}_${Math.random().toString(36).slice(2, 6)}`;
+  const newName = getNextCopyName(template.name, existingNames);
+
+  // Deep-copy nodes and edges
+  const nodes = template.nodes.map((n) => ({
+    ...n,
+    data: { ...n.data },
+  }));
+  const edges = template.edges.map((e) => ({ ...e }));
+
+  return {
+    ...template,
+    id: newId,
+    name: newName,
+    nodes,
+    edges,
+  };
+}
+
 // ── Convenience: workflow → template ────────────────────────────
 
 /**

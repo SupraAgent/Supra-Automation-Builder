@@ -274,10 +274,14 @@ export {
   workflowToTemplate,
   type ExportTemplateInput,
   type ImportTemplateResult,
+  getNextCopyName,
+  copyTemplateForUse,
 } from "./core/template-utils";
 
 export { TemplateBrowser, type TemplateBrowserProps } from "./components/template-browser";
 export { TemplateManager, type TemplateManagerProps, type ManagedTemplate } from "./components/template-manager";
+export { NodeContextMenu, type NodeContextMenuProps, type ContextMenuItem } from "./components/node-context-menu";
+export { AIFlowChat, type AIFlowChatProps, type AIFlowChatRequest, type AIFlowChatResponse, type AIFlowMessage } from "./components/ai-flow-chat";
 
 // ── Workflow Portability ──────────────────────────────────────────
 export {
