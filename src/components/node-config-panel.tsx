@@ -267,6 +267,16 @@ function ConfigField({
     );
   }
 
+  if (field.type === "async_select") {
+    return (
+      <AsyncSelectField
+        field={field}
+        value={strVal}
+        onChange={onChange}
+      />
+    );
+  }
+
   if (field.type === "number") {
     return (
       <Field label={field.label}>
@@ -353,6 +363,135 @@ function SecretField({
         <p className="text-[9px] text-muted-foreground mt-0.5">
           Linked to credential vault. Value resolved at execution time.
         </p>
+      )}
+    </Field>
+  );
+}
+
+// ── Async select field (fetch options from URL) ─────────────────
+
+function AsyncSelectField({
+  field,
+  value,
+  onChange,
+}: {
+  field: ConfigFieldDef;
+  value: string;
+  onChange: (value: unknown) => void;
+}) {
+  const [options, setOptions] = React.useState<{ value: string; label: string }[]>([]);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [creating, setCreating] = React.useState(false);
+  const [createName, setCreateName] = React.useState("");
+
+  React.useEffect(() => {
+    if (!field.optionsUrl) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    fetch(field.optionsUrl)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((data: unknown) => {
+        if (cancelled) return;
+        const items = Array.isArray(data) ? data : [];
+        const mapped = field.mapOption
+          ? items.map((item: Record<string, unknown>) => field.mapOption!(item))
+          : items as { value: string; label: string }[];
+        setOptions(mapped);
+      })
+      .catch((err: Error) => {
+        if (!cancelled) setError(err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [field.optionsUrl, field.mapOption]);
+
+  const handleCreate = () => {
+    if (!field.createUrl || !createName.trim()) return;
+    const body: Record<string, string> = {};
+    if (field.createFields) {
+      body[field.createFields.labelKey] = createName.trim();
+    } else {
+      body.name = createName.trim();
+    }
+
+    setCreating(true);
+    fetch(field.createUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((created: Record<string, unknown>) => {
+        const newOpt = field.mapOption
+          ? field.mapOption(created)
+          : {
+              value: String(field.createFields ? created[field.createFields.valueKey] : created.id ?? created.value),
+              label: String(field.createFields ? created[field.createFields.labelKey] : created.name ?? created.label),
+            };
+        setOptions((prev) => [...prev, newOpt]);
+        onChange(newOpt.value);
+        setCreateName("");
+      })
+      .catch((err: Error) => {
+        setError(err.message);
+      })
+      .finally(() => {
+        setCreating(false);
+      });
+  };
+
+  return (
+    <Field label={field.label}>
+      {loading ? (
+        <div className="text-[10px] text-muted-foreground py-1.5">Loading options…</div>
+      ) : error ? (
+        <div className="text-[10px] text-red-400 py-1.5">Failed to load: {error}</div>
+      ) : (
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full rounded-lg border border-white/10 bg-transparent px-3 py-1.5 text-xs outline-none"
+        >
+          <option value="">{field.placeholder ?? "Select…"}</option>
+          {options.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      )}
+      {field.createUrl && (
+        <div className="flex gap-1 mt-1">
+          <input
+            value={createName}
+            onChange={(e) => setCreateName(e.target.value)}
+            placeholder="Create new…"
+            className="flex-1 rounded-lg border border-white/10 bg-transparent px-2 py-1 text-[10px] outline-none focus:border-white/20"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); handleCreate(); }
+            }}
+          />
+          <button
+            type="button"
+            onClick={handleCreate}
+            disabled={creating || !createName.trim()}
+            className="text-[10px] px-2 py-1 rounded-lg border border-white/10 hover:bg-white/5 disabled:opacity-40 transition-colors"
+          >
+            {creating ? "…" : "+"}
+          </button>
+        </div>
       )}
     </Field>
   );
