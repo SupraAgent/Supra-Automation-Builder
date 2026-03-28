@@ -11,7 +11,7 @@ import {
   type WorkflowData,
   type FlowNode,
   type FlowEdge,
-} from "../packages/automation-builder/dist/index";
+} from "@supra/automation-builder";
 import { createSupabaseAdmin } from "@/lib/supabase";
 import { createSupabasePersistence } from "@/lib/workflow-persistence";
 import { renderTemplate } from "@/lib/telegram-templates";
@@ -28,7 +28,7 @@ import type { Workflow } from "@/lib/workflow-db-types";
 
 // Re-export for API route consumers
 export type { Workflow } from "@/lib/workflow-db-types";
-export type { WorkflowEvent, RunResult } from "../packages/automation-builder/dist/index";
+export type { WorkflowEvent, RunResult } from "@supra/automation-builder";
 
 /**
  * CRM action executor — dispatches to existing action functions.
@@ -38,14 +38,20 @@ async function crmActionExecutor(
   config: Record<string, unknown>,
   ctx: ActionContext
 ): Promise<ActionResult> {
-  // Build CRM-compatible context from generic context
-  const crmCtx = {
+  // Build CRM-compatible context from generic context, coercing vars to safe types
+  const coercedVars: Record<string, string | number | undefined> = {};
+  for (const [k, v] of Object.entries(ctx.vars)) {
+    if (v == null) coercedVars[k] = undefined;
+    else if (typeof v === "string" || typeof v === "number") coercedVars[k] = v;
+    else coercedVars[k] = String(v);
+  }
+  const crmCtx: import("@/lib/workflow-actions").ActionContext = {
     workflowId: ctx.workflowId,
     runId: ctx.runId,
     dealId: ctx.dealId as string | undefined,
     contactId: ctx.contactId as string | undefined,
     userId: ctx.userId as string | undefined,
-    vars: ctx.vars,
+    vars: coercedVars,
   };
 
   switch (actionType) {
@@ -68,10 +74,20 @@ async function crmActionExecutor(
   }
 }
 
-function getEngineConfig(): EngineConfig {
+/** No-op persistence for dry-run: no database writes, generates a fake run ID. */
+function createDryRunPersistence(): import("@supra/automation-builder").PersistenceAdapter {
+  return {
+    createRun: async () => `dry-run-${Date.now()}`,
+    updateRun: async () => {},
+    scheduleResume: async () => {},
+    onWorkflowComplete: async () => {},
+  };
+}
+
+function getEngineConfig(dryRun = false): EngineConfig {
   return {
     executeAction: crmActionExecutor,
-    persistence: createSupabasePersistence(),
+    persistence: dryRun ? createDryRunPersistence() : createSupabasePersistence(),
     renderTemplate: (template, vars) => renderTemplate(template, vars),
   };
 }
@@ -128,7 +144,7 @@ export async function executeWorkflow(
 ) {
   const supabase = createSupabaseAdmin();
   if (!supabase) {
-    return { runId: "", status: "failed" as const, nodeOutputs: {}, error: "Supabase not configured" };
+    return { runId: "", status: "failed" as const, nodeOutputs: {}, nodeTimings: {}, error: "Supabase not configured" };
   }
 
   const { data: workflow } = await supabase
@@ -138,7 +154,7 @@ export async function executeWorkflow(
     .single();
 
   if (!workflow) {
-    return { runId: "", status: "failed" as const, nodeOutputs: {}, error: "Workflow not found" };
+    return { runId: "", status: "failed" as const, nodeOutputs: {}, nodeTimings: {}, error: "Workflow not found" };
   }
 
   return executeWorkflowFromData(workflow as unknown as Workflow, event, supabase);
@@ -173,6 +189,50 @@ export async function executeWorkflowFromData(
 }
 
 /**
+ * Execute a workflow in dry-run mode — traverses the graph, evaluates conditions,
+ * but skips actual action execution and delay pausing. Returns full node outputs
+ * showing what would have happened.
+ */
+export async function executeWorkflowDryRun(
+  workflowId: string,
+  event: CrmWorkflowEvent
+) {
+  const supabase = createSupabaseAdmin();
+  if (!supabase) {
+    return { runId: "", status: "failed" as const, nodeOutputs: {}, error: "Supabase not configured" };
+  }
+
+  const { data: workflow } = await supabase
+    .from("crm_workflows")
+    .select("*")
+    .eq("id", workflowId)
+    .single();
+
+  if (!workflow) {
+    return { runId: "", status: "failed" as const, nodeOutputs: {}, error: "Workflow not found" };
+  }
+
+  const vars = await buildVars(event, supabase);
+
+  const workflowData: WorkflowData = {
+    id: workflow.id,
+    name: workflow.name,
+    description: workflow.description,
+    nodes: (workflow.nodes ?? []) as FlowNode[],
+    edges: (workflow.edges ?? []) as FlowEdge[],
+    is_active: workflow.is_active,
+    trigger_type: workflow.trigger_type,
+  };
+
+  return genericExecuteWorkflow(workflowData, event, {
+    vars,
+    dealId: event.dealId,
+    contactId: event.contactId,
+    userId: (workflow as unknown as Workflow).created_by ?? undefined,
+  }, getEngineConfig(true));
+}
+
+/**
  * Resume a paused workflow run (called after delay expires).
  */
 export async function resumeWorkflowRun(runId: string) {
@@ -188,7 +248,7 @@ export async function resumeWorkflowRun(runId: string) {
     .single();
 
   if (!run || run.status !== "paused") {
-    return { runId, status: "failed" as const, nodeOutputs: {}, error: "Run not found or not paused" };
+    return { runId, status: "failed" as const, nodeOutputs: {}, nodeTimings: {}, error: "Run not found or not paused" };
   }
 
   const workflow = run.workflow as unknown as Workflow;
@@ -202,7 +262,7 @@ export async function resumeWorkflowRun(runId: string) {
       completed_at: new Date().toISOString(),
       node_outputs: nodeOutputs,
     }).eq("id", runId);
-    return { runId, status: "completed" as const, nodeOutputs };
+    return { runId, status: "completed" as const, nodeOutputs, nodeTimings: {} };
   }
 
   const vars = await buildVars(triggerEvent, supabase);
@@ -252,6 +312,8 @@ export async function triggerWorkflowsByEvent(
 
   if (!workflows || workflows.length === 0) return;
 
+  // Filter matching workflows first
+  const matching: typeof workflows = [];
   for (const wf of workflows) {
     const nodes = (wf.nodes ?? []) as FlowNode[];
     const triggerNode = nodes.find((n) => (n as unknown as { type: string }).type === "trigger");
@@ -268,14 +330,24 @@ export async function triggerWorkflowsByEvent(
       }
     }
 
-    const event: CrmWorkflowEvent = {
-      type: triggerType,
-      dealId: payload.deal_id as string | undefined,
-      payload,
-    };
+    matching.push(wf);
+  }
 
-    executeWorkflowFromData(wf as unknown as Workflow, event, supabase).catch((err) => {
-      console.error(`[workflow-engine] Error executing workflow ${wf.id}:`, err);
-    });
+  // Execute in batches of 5 to avoid overwhelming Supabase/Telegram
+  const BATCH_SIZE = 5;
+  for (let i = 0; i < matching.length; i += BATCH_SIZE) {
+    const batch = matching.slice(i, i + BATCH_SIZE);
+    await Promise.allSettled(
+      batch.map((wf) => {
+        const event: CrmWorkflowEvent = {
+          type: triggerType,
+          dealId: payload.deal_id as string | undefined,
+          payload,
+        };
+        return executeWorkflowFromData(wf as unknown as Workflow, event, supabase).catch((err) => {
+          console.error(`[workflow-engine] Error executing workflow ${wf.id}:`, err);
+        });
+      })
+    );
   }
 }
