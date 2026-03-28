@@ -1,8 +1,31 @@
-node_modules/
-dist/
-*.tsbuildinfo
+# dependencies
+/node_modules
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
 .DS_Store
 
-# claude code (personal overrides)
+# env files
+.env
+.env*.local
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# claude code (personal overrides — don't commit agent config)
 CLAUDE.local.md
 .claude/settings.local.json
+.claude/settings.json
+.claude/commands/
+.claude/rules/
+.claude/skills/

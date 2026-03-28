@@ -1,0 +1,42 @@
+@import "tailwindcss";
+@source "../../packages/builder/src";
+
+@theme {
+  --radius: 14px;
+
+  --color-background: hsl(225 35% 4%);
+  --color-foreground: hsl(210 40% 98%);
+  --color-card: hsl(225 35% 6%);
+  --color-card-foreground: hsl(210 40% 98%);
+  --color-border: hsl(225 18% 14%);
+  --color-muted: hsl(225 22% 10%);
+  --color-muted-foreground: hsl(215 18% 80%);
+  --color-primary: hsl(158 64% 52%);
+  --color-primary-foreground: hsl(210 40% 6%);
+  --color-accent: hsl(226 28% 10%);
+  --color-accent-foreground: hsl(210 40% 98%);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+@supports (height: 100dvh) {
+  html, body {
+    height: 100dvh;
+  }
+}
+
+body {
+  background:
+    radial-gradient(1200px 800px at 20% 10%, rgba(12, 206, 107, 0.12), transparent 60%),
+    radial-gradient(900px 700px at 80% 25%, rgba(12, 206, 107, 0.06), transparent 55%),
+    radial-gradient(1200px 900px at 45% 85%, rgba(12, 206, 107, 0.04), transparent 60%),
+    var(--color-background);
+  color: var(--color-foreground);
+}
+
+* {
+  border-color: var(--color-border);
+}
