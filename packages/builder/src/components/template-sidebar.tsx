@@ -659,7 +659,7 @@ function FeaturedBridgeSpotlight({
         Gap-to-Improvement Bridge
       </h4>
       <p className="text-[10px] text-muted-foreground leading-relaxed mb-3">
-        The core SupraLoop workflow. Identifies your weakest categories, generates AI fixes, gets CPO feedback, and re-scores — all in one run.
+        The core Athena workflow. Identifies your weakest categories, generates AI fixes, gets CPO feedback, and re-scores — all in one run.
       </p>
 
       {/* Flow preview: mini node diagram */}

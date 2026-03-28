@@ -55,7 +55,7 @@ export type VersionDiff = {
 
 // ── Storage key helpers ──────────────────────────────────────────
 
-let _prefix = "supraloop";
+let _prefix = "athena";
 
 export function setVersionStorePrefix(prefix: string): void {
   _prefix = prefix;

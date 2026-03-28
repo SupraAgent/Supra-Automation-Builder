@@ -55,7 +55,7 @@ describe("workspace CRUD", () => {
     storage = mockLocalStorage();
     Object.defineProperty(globalThis, "localStorage", { value: storage, writable: true });
     // Reset to default keys before each test
-    setStorageKeys("supraloop:workspaces", "supraloop:active-workspace");
+    setStorageKeys("athena:workspaces", "athena:active-workspace");
   });
 
   it("getWorkspaces returns empty array when nothing stored", () => {
@@ -175,7 +175,7 @@ describe("saveAll returns false on quota error", () => {
   beforeEach(() => {
     storage = mockLocalStorage();
     Object.defineProperty(globalThis, "localStorage", { value: storage, writable: true });
-    setStorageKeys("supraloop:workspaces", "supraloop:active-workspace");
+    setStorageKeys("athena:workspaces", "athena:active-workspace");
   });
 
   it("saveWorkspace returns false when localStorage.setItem throws", () => {

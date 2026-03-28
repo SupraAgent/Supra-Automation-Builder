@@ -226,7 +226,7 @@ export function WorkflowBuilder({
   initialEdges: propInitialEdges,
   category = "workflow",
   customNodeTypes,
-  storageKeyPrefix = "supraloop",
+  storageKeyPrefix = "athena",
   disableAutoLayout = false,
   onNodesChange: onNodesChangeProp,
   onEdgesChange: onEdgesChangeProp,

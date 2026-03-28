@@ -205,7 +205,7 @@ export function OnboardingTour({ onComplete, onSkip }: OnboardingTourProps) {
   );
 }
 
-export function useOnboarding(prefix = "supraloop") {
+export function useOnboarding(prefix = "athena") {
   const key = `${prefix}:onboarding-completed`;
   const [showTour, setShowTour] = React.useState(false);
 

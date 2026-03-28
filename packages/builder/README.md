@@ -76,7 +76,7 @@ This renders a complete workflow builder with a node palette, canvas, minimap, t
 | `initialEdges` | `Edge[]` | `[]` | Initial edges connecting the nodes. |
 | `category` | `"team" \| "app" \| "benchmark" \| "scoring" \| "improve" \| "workflow" \| "custom"` | `"workflow"` | Template category filter for the template sidebar. |
 | `customNodeTypes` | `Record<string, React.ComponentType<unknown>>` | `undefined` | Register additional node types alongside the 14 built-in types. |
-| `storageKeyPrefix` | `string` | `"supraloop"` | Prefix for localStorage keys used by workspaces and templates. |
+| `storageKeyPrefix` | `string` | `"athena"` | Prefix for localStorage keys used by workspaces and templates. |
 | `disableAutoLayout` | `boolean` | `false` | Disable automatic layout when loading a template. |
 | `className` | `string` | `undefined` | CSS class applied to the root container. |
 

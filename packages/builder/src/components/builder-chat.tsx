@@ -96,7 +96,7 @@ export function BuilderChat({
   onUserNodeCreated,
   onChat,
   apiKey: propApiKey,
-  storageKeyPrefix = "supraloop",
+  storageKeyPrefix = "athena",
 }: BuilderChatProps) {
   const [activeTab, setActiveTab] = React.useState<ChatTab>("chat");
   const [messages, setMessages] = React.useState<Message[]>([

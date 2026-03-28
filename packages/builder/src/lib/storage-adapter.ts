@@ -103,7 +103,7 @@ export class LocalStorageAdapter implements StorageAdapter {
 
 // ── IndexedDBAdapter ────────────────────────────────────────────────
 
-const IDB_NAME = "supraloop-storage";
+const IDB_NAME = "athena-storage";
 const IDB_STORE = "kv";
 
 /**
